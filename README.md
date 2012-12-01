@@ -17,7 +17,7 @@ History
 -------
 IronGrip is a stripped-down (and experimental) fork of the Asunder project.
 The Asunder program is a graphical Audio CD ripper and encoder for Linux.
-Asunder's project homepage : http://littlesvr.ca/asunder
+Asunder's project homepage : http://littlesvr.ca/asunder .
 I would like to thank the authors and contributors of the Asunder project for sharing their work under GPL.
 If you're looking for a stable audio CD ripper and encoder with lots of encoding formats, then you should use Asunder instead of IronGrip.
 Asunder's packages are available for several linux distributions.
@@ -39,9 +39,15 @@ Requirements
 - LAME (for MP3 support)
   http://lame.sourceforge.net/
 
+Installing requirements in Ubuntu
+---------------------------------
+To install Cdparanoia and Lame from a terminal, type the following commands:
+- sudo apt-get install cdparanoia
+- sudo apt-get install lame
+
 Build dependencies
 ------------------
-First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...)
+First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...).
 To compile the source, you may also need the -dev or -devel versions of GTK+ and libcddb.
 On Ubuntu, these packages are called libgtk2.0-dev and libcddb2-dev.
 

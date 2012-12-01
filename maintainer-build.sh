@@ -14,6 +14,7 @@ make maintainer-clean
 rm Makefile.in aclocal.m4 config.h.in configure  depcomp  install-sh  missing src/Makefile.in 2> /dev/null
 rm -r autom4te.cache 2> /dev/null
 rm po/Makefile.in.in 2> /dev/null
+rm src/irongrip.icon.h 2> /dev/null
 
 if [ "x${ACTION}" != "xbuild" ];
 then

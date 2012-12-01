@@ -1,0 +1,46 @@
+dnl Process this file with autoconf to produce a configure script.
+
+AC_PREREQ([2.67])
+AC_INIT(configure.ac)
+AM_INIT_AUTOMAKE(irongrip, 0.1)
+AM_CONFIG_HEADER(config.h)
+AM_MAINTAINER_MODE
+IT_PROG_INTLTOOL([0.34.90])
+
+AC_ISC_POSIX
+AC_PROG_CC
+AM_PROG_CC_STDC
+AC_HEADER_STDC
+AC_HEADER_STDBOOL
+AC_CHECK_HEADERS([fcntl.h libintl.h limits.h pthread.h stdlib.h string.h sys/ioctl.h unistd.h])
+AC_TYPE_MODE_T
+AC_TYPE_PID_T
+AC_FUNC_FORK
+AC_FUNC_MALLOC
+AC_CHECK_FUNCS([bzero dup2 memset mkdir strdup strerror strrchr strtol])
+
+pkg_modules="gtk+-2.0 >= 2.6.0, gthread-2.0 >= 2.4.0, libcddb >= 0.9.5"
+PKG_CHECK_MODULES(PACKAGE, [$pkg_modules])
+AC_SUBST(PACKAGE_CFLAGS)
+AC_SUBST(PACKAGE_LIBS)
+
+GETTEXT_PACKAGE=irongrip
+AC_SUBST(GETTEXT_PACKAGE)
+AC_DEFINE_UNQUOTED(GETTEXT_PACKAGE,"$GETTEXT_PACKAGE", [Gettext package.])
+
+PIXMAPDIR=pixmaps
+AC_SUBST(PIXMAPDIR)
+AC_DEFINE_UNQUOTED(PIXMAPDIR,"$PIXMAPDIR", [Pictures directory.])
+
+AM_GLIB_GNU_GETTEXT
+
+CFLAGS="-DDEBUG -O0 -ggdb -Wall -pedantic -std=gnu99"
+
+AC_DEFINE([PROGRAM_NAME], ["IronGrip"], ["Program name"])
+
+AC_OUTPUT([
+Makefile
+src/Makefile
+po/Makefile.in
+])
+

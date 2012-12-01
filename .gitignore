@@ -15,3 +15,7 @@
 *.exe
 *.out
 *.app
+
+# translation template
+po/irongrip.po
+

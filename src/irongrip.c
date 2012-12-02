@@ -157,7 +157,6 @@ typedef struct _shared {
 	double rip_percent;
 	double mp3_percent;
 	bool aborted; /* for canceling */
-	bool waitBeforeSigchld;
 	int cddb_query_thread_num_matches;
 } shared;
 
@@ -228,6 +227,10 @@ static bool log_init()
 	char *fmode = mode_append;
 
 	global_data->log_fd = NULL; // We will not try to write traces if no log file is opened.
+
+	if(!global_prefs->do_log)
+		return TRUE;
+
 	fmode = mode_append;
 	if(stat(global_prefs->log_file,&sts)==0) {
 		if(sts.st_size>global_prefs->max_log_size) { // File is too big, overwrite it.
@@ -246,17 +249,18 @@ static bool log_init()
 static void log_end()
 {
 	char time_str[32];
+
+	if(global_data->log_fd == NULL)
+		return;
+
+	if(!global_prefs->do_log)
+		return;
+
 	get_time_str(time_str);
 	fprintf(global_data->log_fd, "\n ----- %s STOP -----\n", time_str);
 	fflush(global_data->log_fd);
 	fclose(global_data->log_fd);
 }
-
-#ifndef DX
-#define DX(n)		char *dx = n
-#define DX_STA		log_gen(dx, LOG_DEBUG, "---- START ----")
-#define DX_END		log_gen(dx, LOG_DEBUG, "----  END  ----")
-#endif
 
 /** convert log level to string. */
 static char* strloglevel(int log_level)
@@ -277,6 +281,10 @@ static void log_gen(const char *func_name, int log_level, const char *fmt, ...)
 	static int n=0; // be persistent
 	if(global_data->log_fd==NULL)
 		global_data->log_fd = stderr;
+
+	if(global_prefs->do_log == 0 && log_level != LOG_FATAL)
+		return;
+
 	va_list args;
 	log_time();
 	fprintf(global_data->log_fd,"0x%04lX|%04d|%s|%s|", pthread_self(), ++n, strloglevel(log_level), func_name);
@@ -886,6 +894,8 @@ static void eject_disc(char *cdrom)
 	if(eject < 0) {
 		perror("ioctl");
 		log_gen(__func__, LOG_INFO, "Eject returned %d", eject);
+
+		// TODO: use '/usr/bin/eject' on ubuntu because ioctl seems to work only as root
 	}
 	close(fd);
 }
@@ -1067,7 +1077,6 @@ static void update_tracklist(cddb_disc_t * disc)
 
 static void refresh(char *cdrom, int force)
 {
-	DX("refresh");
 	if (working) // don't do anything
 		return;
 
@@ -1090,7 +1099,7 @@ static void refresh(char *cdrom, int force)
 	disc_matches = lookup_disc(disc);
 	cddb_disc_destroy(disc);
 	if (disc_matches == NULL) {
-		log_gen(dx, LOG_WARN, "No disc matches !");
+		log_gen(__func__, LOG_WARN, "No disc matches !");
 		return;
 	}
 	// fill in and show the album drop-down box
@@ -1112,9 +1121,9 @@ static void refresh(char *cdrom, int force)
 			gtk_list_store_append(store, &iter);
 			gtk_list_store_set(store, &iter, 0, artist, 1, title, -1);
 		}
-		gtk_combo_box_set_model(GTK_COMBO_BOX(LKP_MAIN("pick_disc")), GTK_TREE_MODEL(store));
-		gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_MAIN("pick_disc")), 1);
-		gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_MAIN("pick_disc")), 0);
+		gtk_combo_box_set_model(GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC)), GTK_TREE_MODEL(store));
+		gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC)), 1);
+		gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC)), 0);
 		WIDGET_SHOW("disc");
 		WIDGET_SHOW(WDG_PICK_DISC);
 	}
@@ -1135,7 +1144,6 @@ static gboolean for_each_row_select(GtkTreeModel * model, GtkTreePath * path, Gt
 
 static gboolean idle(gpointer data)
 {
-    log_gen(__func__, LOG_INFO, "scan when idle");
     refresh(global_prefs->cdrom, 0);
     return (data != NULL);
 }
@@ -1666,6 +1674,7 @@ static GtkWidget *create_main(void)
 	GtkWidget *pick_disc = gtk_combo_box_new();
 	gtk_table_attach(GTK_TABLE(table2), pick_disc, 1, 2, 0, 1, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (GTK_FILL), 0, 0);
 
+
 	GtkWidget *album_genre = gtk_entry_new();
 	create_completion(album_genre, WDG_ALBUM_GENRE);
 	gtk_widget_show(album_genre);
@@ -2005,22 +2014,41 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	/* WAV */
+	GtkWidget *frame0 = gtk_frame_new(NULL);
+	gtk_widget_show(frame0);
+	gtk_box_pack_start(GTK_BOX(vbox), frame0, FALSE, FALSE, 0);
+	GtkWidget *alignment1 = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(alignment1);
+	gtk_container_add(GTK_CONTAINER(frame0), alignment1);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment1), 1, 1, 8, 8);
+	GtkWidget *vbox0 = gtk_vbox_new(FALSE, 0);
+	gtk_widget_show(vbox0);
+	gtk_container_add(GTK_CONTAINER(alignment1), vbox0);
+
 	GtkWidget *rip_wav = gtk_check_button_new_with_mnemonic(_("WAV (uncompressed)"));
 	gtk_widget_show(rip_wav);
-	gtk_box_pack_start(GTK_BOX(vbox), rip_wav, FALSE, FALSE, 0);
+	gtk_frame_set_label_widget(GTK_FRAME(frame0), rip_wav);
+
+	label = gtk_label_new(_("WAV files retain maximum sound quality, but they are very big."
+							" You should keep WAV files if you intend to create Audio discs."
+							" WAV files can be converted back to audio tracks with CD burning software."));
+	gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+	gtk_widget_show(label);
+	gtk_box_pack_start(GTK_BOX(vbox0), label, FALSE, FALSE, 0);
+
 	/* END WAV */
 
 	/* MP3 */
 	GtkWidget *frame3 = gtk_frame_new(NULL);
 	gtk_widget_show(frame3);
-	gtk_box_pack_start(GTK_BOX(vbox), frame3, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), frame3, TRUE, FALSE, 0);
 
 	GtkWidget *alignment8 = gtk_alignment_new(0.5, 0.5, 1, 1);
 	gtk_widget_show(alignment8);
 	gtk_container_add(GTK_CONTAINER(frame3), alignment8);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment8), 2, 2, 12, 2);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment8), 1, 1, 8, 8);
 
-	GtkWidget *vbox2 = gtk_vbox_new(FALSE, 0);
+	GtkWidget *vbox2 = gtk_vbox_new(FALSE, 8);
 	gtk_widget_show(vbox2);
 	gtk_container_add(GTK_CONTAINER(alignment8), vbox2);
 
@@ -2032,23 +2060,35 @@ static GtkWidget *create_prefs(void)
 	tooltips = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tooltips, mp3_vbr, _("Better quality for the same size."), NULL);
 
+	GtkWidget *p_combo = gtk_combo_box_new_text();
+	gtk_widget_show(p_combo);
+	tooltips = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tooltips, p_combo, _("Choosing 'High quality' is recommended."), NULL);
+	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "Low quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "Good quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "High quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "Maximum quality");
+	gtk_combo_box_set_active (GTK_COMBO_BOX (p_combo), 2);
+	gtk_box_pack_start(GTK_BOX(vbox2), p_combo, FALSE, FALSE, 0);
+
 	GtkWidget *hbox9 = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox9);
-	gtk_box_pack_start(GTK_BOX(vbox2), hbox9, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox2), hbox9, FALSE, FALSE, 0);
 
-	label = gtk_label_new(_("Bitrate"));
+	label = gtk_label_new(_("Bitrate : "));
 	gtk_widget_show(label);
 	gtk_box_pack_start(GTK_BOX(hbox9), label, FALSE, FALSE, 0);
 	HOOKUP(prefs, label, "bitrate_lbl");
 
 	GtkWidget *mp3bitrate = gtk_hscale_new(GTK_ADJUSTMENT(gtk_adjustment_new(0, 0, 14, 1, 1, 1)));
-	gtk_widget_show(mp3bitrate);
-	gtk_box_pack_start(GTK_BOX(hbox9), mp3bitrate, TRUE, TRUE, 5);
+	//gtk_widget_show(mp3bitrate);
+	gtk_box_pack_start(GTK_BOX(hbox9), mp3bitrate, FALSE, FALSE, 5);
 	gtk_scale_set_draw_value(GTK_SCALE(mp3bitrate), FALSE);
 	gtk_scale_set_digits(GTK_SCALE(mp3bitrate), 0);
 	g_signal_connect((gpointer) mp3bitrate, "value_changed", G_CALLBACK(on_mp3bitrate_value_changed), NULL);
 	tooltips = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tooltips, mp3bitrate, _("Higher bitrate is better quality but also bigger file. Most people use 192Kbps."), NULL);
+
 
 	char kbps_text[10];
 	snprintf(kbps_text, 10, _("%dKbps"), 32);
@@ -2738,6 +2778,7 @@ void make_playlist(const char *filename, FILE ** file)
 }
 
 static int exec_with_output(const char * args[], int toread, pid_t * p);
+static void sigchld();
 
 // uses cdparanoia to rip a WAV track from a cdrom
 //
@@ -2745,7 +2786,7 @@ static int exec_with_output(const char * args[], int toread, pid_t * p);
 // tracknum - the track to rip
 // filename - the name of the output WAV file
 // progress - the percent done
-static void cdparanoia2(char *cdrom, int tracknum, char *filename)
+static void cdparanoia(char *cdrom, int tracknum, char *filename)
 {
 	char trackstring[3];
 	snprintf(trackstring, 3, "%d", tracknum);
@@ -2755,6 +2796,8 @@ static void cdparanoia2(char *cdrom, int tracknum, char *filename)
 	fd_set readfds;
 	FD_ZERO(&readfds);
 	FD_SET(fd, &readfds);
+
+	log_gen(__func__, LOG_TRACE, "Start of ripping track %d, fd=%d", tracknum, fd);
 
 	// to convert the progress number stat cdparanoia spits out
 	// into sector numbers divide by 1176
@@ -2776,13 +2819,19 @@ static void cdparanoia2(char *cdrom, int tracknum, char *filename)
 			pos++;
 			size = read(fd, &buf[pos], 1);
 			/* signal interrupted read(), try again */
-			if (size == -1 && errno == EINTR) {
-				pos--;
-				size = 1;
+			if (size == -1) {
+				if(errno == EINTR) {
+					log_gen(__func__, LOG_WARN, "signal interrupted read(), try again at position %d", pos);
+					pos--;
+					size = 1;
+				} else {
+					perror("Read error from cdparanoia");
+					log_gen(__func__, LOG_WARN, "read error");
+				}
 			}
 		} while ((buf[pos] != '\n') && (size > 0) && (pos < 256));
 		buf[pos] = '\0';
-		// printf("%s\r", buf);
+		// printf("%s\n", buf);
 		int start;
 		int end;
 		int sector;
@@ -2799,19 +2848,21 @@ static void cdparanoia2(char *cdrom, int tracknum, char *filename)
 				global_data->rip_percent = (double)(sector - start) / (end - start);
 			}
 		} else {
+			printf("Unknown data : %s\n", buf);
 		}
 	} while (size > 0);
 
 cleanup:
+	log_gen(__func__, LOG_TRACE, "End of ripping track %d", tracknum);
 	close(fd);
+	sigchld();
 	/* don't go on until the signal for the previous call is handled */
-	while (cdparanoia_pid != 0) {
-		log_gen(__func__, LOG_INFO, "Waiting for cdparanoia_pid ...");
-		Sleep(900);
-		if (cdparanoia_pid != 0)
-			kill(cdparanoia_pid, SIGKILL);
+	if (cdparanoia_pid != 0) {
+		kill(cdparanoia_pid, SIGKILL);
 	}
 }
+
+static void set_status(char *text);
 
 // the thread that handles ripping tracks to WAV files
 static gpointer rip_thread(gpointer data)
@@ -2847,7 +2898,7 @@ static gpointer rip_thread(gpointer data)
 			char *musicfilename = parse_format(global_prefs->format_music, tracknum, albumyear, trackartist, albumtitle, albumgenre, tracktitle);
 			char *wavfilename = make_filename(prefs_get_music_dir(global_prefs), albumdir, musicfilename, "wav");
 
-			//set_status("Ripping track %d to \"%s\"\n", tracknum, wavfilename);
+			// TODO: set_status("Ripping track %d to \"%s\"\n", tracknum, wavfilename);
 
 			if (global_data->aborted) g_thread_exit(NULL);
 
@@ -2860,7 +2911,7 @@ static gpointer rip_thread(gpointer data)
 				if (!confirmOverwrite(wavfilename)) doRip = false;
 				gdk_threads_leave();
 			}
-			if (doRip) cdparanoia2(global_prefs->cdrom, tracknum, wavfilename);
+			if (doRip) cdparanoia(global_prefs->cdrom, tracknum, wavfilename);
 
 			g_free(albumdir);
 			g_free(musicfilename);
@@ -2879,8 +2930,10 @@ static gpointer rip_thread(gpointer data)
 	}
 	// no more tracks to rip, safe to eject
 	if (global_prefs->eject_on_done) {
+		set_status("Trying to eject disc...");
 		eject_disc(global_prefs->cdrom);
 	}
+	set_status("Finished");
 	return NULL;
 }
 
@@ -2985,7 +3038,7 @@ static void dorip()
 	g_free(albumdir);
 	g_free(playlist);
 
-	set_status("Ripping");
+	set_status("Working...");
 	disable_all_main_widgets();
 	gtk_widget_show(LKP_MAIN("win_ripping"));
 	gtk_widget_hide(LKP_MAIN("scroll"));
@@ -3063,18 +3116,11 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 		int end;
 		if (sscanf(buf, "%d/%d", &sector, &end) == 2) {
 			global_data->mp3_percent = (double)sector / end;
-			if(global_data->mp3_percent>0.9) {
-				log_gen(__func__, LOG_INFO, "global_data->mp3_percent = %.2f%%", global_data->mp3_percent*100.0);
-			}
 		}
 	} while (size > 0);
 	close(fd);
-	Sleep(300);
-	/* don't go on until the signal for the previous call is handled */
-	while (lame_pid != 0) {
-		log_gen(__func__, LOG_INFO, "w4");
-		Sleep(300);
-	}
+	Sleep(200);
+	sigchld();
 }
 
 // the thread that handles encoding WAV files to all other formats
@@ -3221,7 +3267,7 @@ static gpointer encode_thread(gpointer data)
 		printf("w2\n");
 		Sleep(300);
 	}
-	Sleep(800);
+	Sleep(200);
 	log_gen(__func__, LOG_INFO, "Waking up to allDone");
 	global_data->allDone = true;		// so the tracker thread will exit
 	working = false;
@@ -3239,7 +3285,6 @@ static gpointer track_thread(gpointer data)
 {
 	int parts = 1;
 	if (global_prefs->rip_mp3) parts++;
-	log_gen(__func__, LOG_INFO, "Wait for set up waiting bars");
 	gdk_threads_enter();
 	GtkProgressBar *progress_total = GTK_PROGRESS_BAR(LKP_MAIN("progress_total"));
 	GtkProgressBar *progress_rip = GTK_PROGRESS_BAR(LKP_MAIN("progress_rip"));
@@ -3255,7 +3300,6 @@ static gpointer track_thread(gpointer data)
 		gtk_progress_bar_set_fraction(progress_encode, 1.0);
 		gtk_progress_bar_set_text(progress_encode, "100% (0/0)");
 	}
-	log_gen(__func__, LOG_INFO, "Waiting bars are setup");
 	gdk_threads_leave();
 
 	double prip;
@@ -3266,9 +3310,12 @@ static gpointer track_thread(gpointer data)
 	bool started = false;
 
 	while (!global_data->allDone && ptotal < 1.0) {
-		if (global_data->aborted) g_thread_exit(NULL);
+		if (global_data->aborted) {
+			log_gen(__func__, LOG_WARN, "Aborted 1");
+			g_thread_exit(NULL);
+		}
 		if(!started && global_data->rip_percent <= 0.0 && (parts == 1 || global_data->mp3_percent <= 0.0)) {
-			Sleep(200);
+			Sleep(400);
 			continue;
 		}
 		started = true;
@@ -3285,16 +3332,16 @@ static gpointer track_thread(gpointer data)
 		} else {
 			ptotal = prip;
 		}
-		if(ptotal>0.9) {
-			log_gen(__func__, LOG_WARN, "ptotal = %f, pencode=%.2f", ptotal, pencode*100.0);
-		}
 		char stotal[9];
 		snprintf(stotal, 9, "%02.2f%%", ptotal * 100);
 
 		char windowTitle[32];	/* "IronGrip - 100%" */
 		strcpy(windowTitle, PROGRAM_NAME " - ");
 		strcat(windowTitle, stotal);
-		if (global_data->aborted) g_thread_exit(NULL);
+		if (global_data->aborted) {
+			log_gen(__func__, LOG_WARN, "Aborted 2");
+			g_thread_exit(NULL);
+		}
 
 		gdk_threads_enter();
 		gtk_progress_bar_set_fraction(progress_rip, prip);
@@ -3307,63 +3354,38 @@ static gpointer track_thread(gpointer data)
 		gtk_progress_bar_set_text(progress_total, stotal);
 		gtk_window_set_title(GTK_WINDOW(win_main), windowTitle);
 		gdk_threads_leave();
-
-		Sleep(300);
+		Sleep(200);
 	}
 	gdk_threads_enter();
 	gtk_window_set_title(GTK_WINDOW(win_main), "Iron Grip");
 	gdk_threads_leave();
+	log_gen(__func__, LOG_TRACE, "The End.");
 	return NULL;
 }
 
-static void signal_mask(int how) {
-	sigset_t block_chld;
-	sigemptyset(&block_chld);
-	sigaddset(&block_chld, SIGCHLD);
-	sigprocmask(how, &block_chld, NULL); // maybe a problem because of multi-threading?
-}
-
-static void blockSigChld(void)
-{
-	signal_mask(SIG_BLOCK);
-	/*!! for some reason the blocking above doesn't work, so do this for now */
-	global_data->waitBeforeSigchld = true;
-}
-
-static void unblockSigChld(void)
-{
-	signal_mask(SIG_UNBLOCK);
-	global_data->waitBeforeSigchld = false;
-}
-
 // signal handler to find out when our child has exited
-static void sigchld(int signum)
+static void sigchld()
 {
-	// Cannot call debugLog at this point
 	if (global_prefs == NULL)
 		return;
 
-	int status;
+	int status = -1;
 	pid_t pid = wait(&status);
-	log_gen(__func__, LOG_INFO, "sigchld for %d (know about wav %d, mp3 %d", pid, cdparanoia_pid, lame_pid);
+	log_gen(__func__, LOG_INFO, "waited for %d, status=%d (know about wav %d, mp3 %d)",
+			pid, status, cdparanoia_pid, lame_pid);
 
-	/* this is because i can't seem to be able to block sigchld: */
-	while (global_data->waitBeforeSigchld) {
-		log_gen(__func__, LOG_INFO, "waiting in sigchld()");
-		Sleep(200);
-	}
 	if (pid != cdparanoia_pid && pid != lame_pid) {
-		log_gen(__func__, LOG_FATAL, "SIGCHLD for unknown pid, report bug please");
+		log_gen(__func__, LOG_FATAL, "unknown pid, report bug please");
 	}
-	log_gen(__func__, LOG_INFO, "%d exited with %d: ", pid, status);
-	if (WIFEXITED(status))
-		log_gen(__func__, LOG_INFO, "exited, status=%d", WEXITSTATUS(status));
-	else if (WIFSIGNALED(status))
+	if (WIFEXITED(status)) {
+		// log_gen(__func__, LOG_INFO, "exited, status=%d", WEXITSTATUS(status));
+	} else if (WIFSIGNALED(status)) {
 		log_gen(__func__, LOG_INFO, "killed by signal %d", WTERMSIG(status));
-	else if (WIFSTOPPED(status))
+	} else if (WIFSTOPPED(status)) {
 		log_gen(__func__, LOG_INFO, "stopped by signal %d", WSTOPSIG(status));
-	else if (WIFCONTINUED(status))
+	} else if (WIFCONTINUED(status)) {
 		log_gen(__func__, LOG_INFO, "continued");
+	}
 
 	if (status != 0) {
 		if (pid == cdparanoia_pid) {
@@ -3384,7 +3406,6 @@ static void sigchld(int signum)
 			numLameOk++;
 		}
 	}
-	log_gen(__func__, LOG_INFO, "sigchld completed");
 }
 
 // fork() and exec() the file listed in "args"
@@ -3398,21 +3419,12 @@ static int exec_with_output(const char *args[], int toread, pid_t * p)
 {
 	int pipefd[2];
 
-	blockSigChld();
-
 	if (pipe(pipefd) != 0)
 		fatalError("exec_with_output(): failed to create a pipe");
 
 	if ((*p = fork()) == 0) { // im the child, i execute the command
 		close(pipefd[0]); // close the side of the pipe we don't need
 
-		int exec_fd = open(EXEC_OUTPUT_LOG, O_APPEND|O_CREAT, S_IRWXU);
-
-		/* instead redirect to /dev/null */
-		if (exec_fd != -1) {
-			dup2(STDOUT_FILENO, exec_fd); // close(STDOUT_FILENO);
-			dup2(STDERR_FILENO, exec_fd); // close(STDERR_FILENO);
-		}
 		// setup output
 		dup2(pipefd[1], toread);
 		close(pipefd[1]);
@@ -3431,23 +3443,7 @@ static int exec_with_output(const char *args[], int toread, pid_t * p)
 
 	// close the side of the pipe we don't need
 	close(pipefd[1]);
-	unblockSigChld();
 	return pipefd[0];
-}
-
-static void setup_signal_handler()
-{
-	/* SET UP signal handler for children */
-	struct sigaction signalHandler;
-	bzero(&signalHandler, sizeof(signalHandler));
-	signalHandler.sa_handler = sigchld;
-	//~ signalHandler.sa_flags = SA_RESTART;
-	sigset_t blockedSignals;
-	sigemptyset(&blockedSignals);
-	sigaddset(&blockedSignals, SIGCHLD);
-	signalHandler.sa_mask = blockedSignals;
-	sigaction(SIGCHLD, &signalHandler, NULL);
-	/* END SET UP signal handler for children */
 }
 
 int main(int argc, char *argv[])
@@ -3463,8 +3459,6 @@ int main(int argc, char *argv[])
 	bind_textdomain_codeset(PACKAGE, UTF8);	/* so that gettext() returns UTF-8 strings */
 	textdomain(PACKAGE);
 #endif
-
-	setup_signal_handler();
 
 	g_thread_init(NULL);
 	gdk_threads_init();

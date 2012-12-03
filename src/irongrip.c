@@ -382,9 +382,12 @@ static long get_field_as_long(char *buf, char *filename, char *field, int *value
 		log_gen(__func__, LOG_WARN, "missing field %s", field);
 		return 0;
 	}
-	long ret = 0;
+	long ret = -1;
 	if(read_long(num, &ret)) {
 		*value = ret;
+		ret= 1;
+	} else {
+		ret= 0;
 	}
 	g_free(num);
 	return ret;
@@ -494,6 +497,27 @@ static int int_to_bitrate(int i, bool vbr)
 	}
 	log_gen(__func__, LOG_WARN, "int_to_bitrate() called with bad parameter (%d)", i);
 	return 32;
+}
+
+static int mp3_quality_to_bitrate(int quality, bool vbr)
+{
+	switch (quality) {
+		case 0:
+			if (vbr) return 165;
+			else return 128;
+		case 1:
+			if (vbr) return 190;
+			else return 192;
+		case 2:
+			if (vbr) return 225;
+			else return 256;
+		case 3:
+			if (vbr) return 245;
+			else return 320;
+	}
+	log_gen(__func__, LOG_WARN, "called with bad parameter (%d)", quality);
+	if (vbr) return 225;
+	else return 256;
 }
 
 // construct a filename from various parts
@@ -1297,10 +1321,14 @@ static void on_vbr_toggled(GtkToggleButton * togglebutton, gpointer user_data)
 {
 	/* update the displayed vbr, as it's different for vbr and non-vbr */
 	bool vbr = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(togglebutton));
-	GtkRange *range = GTK_RANGE(LKP_PREF("mp3bitrate"));
+	// GtkRange *range = GTK_RANGE(LKP_PREF("mp3bitrate"));
+	//snprintf(bitrate, 8, _("%dKbps"), int_to_bitrate((int)gtk_range_get_value(range), vbr));
+
 	char bitrate[8];
-	snprintf(bitrate, 8, _("%dKbps"), int_to_bitrate((int)gtk_range_get_value(range), vbr));
+	gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (LKP_PREF("combo_mp3_quality")));
+	snprintf(bitrate, 8, _("%d Kbps"), mp3_quality_to_bitrate(index, vbr));
 	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
+
 }
 
 static void on_mp3bitrate_value_changed(GtkRange * range, gpointer user_data)
@@ -1313,6 +1341,12 @@ static void on_mp3bitrate_value_changed(GtkRange * range, gpointer user_data)
 
 static void on_mp3_quality_changed(GtkComboBox * combobox, gpointer user_data)
 {
+	char bitrate[8];
+	gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (combobox));
+	bool vbr = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(LKP_PREF("mp3_vbr")));
+	snprintf(bitrate, 8, _("%d Kbps"), mp3_quality_to_bitrate(index, vbr));
+	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
+
 	// gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (combobox));
 	// printf("SELECTED INDEX=[%d]\n", index);
 
@@ -2059,7 +2093,7 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(frame3), alignment8);
 	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment8), 1, 1, 8, 8);
 
-	GtkWidget *vbox2 = gtk_vbox_new(FALSE, 8);
+	GtkWidget *vbox2 = gtk_vbox_new(FALSE, 6);
 	gtk_widget_show(vbox2);
 	gtk_container_add(GTK_CONTAINER(alignment8), vbox2);
 
@@ -2077,7 +2111,7 @@ static GtkWidget *create_prefs(void)
 	gtk_tooltips_set_tip(tooltips, combo_mp3_quality, _("Choosing 'High quality' is recommended."), NULL);
 	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Low quality");
 	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Good quality");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "High quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "High quality (recommended)");
 	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Maximum quality");
 	gtk_combo_box_set_active (GTK_COMBO_BOX (combo_mp3_quality), 2);
 	gtk_box_pack_start(GTK_BOX(vbox2), combo_mp3_quality, FALSE, FALSE, 0);
@@ -2593,8 +2627,9 @@ static void load_prefs(prefs * p)
 	get_field_as_long(s,file,"MP3_BITRATE", &i);
 	if (i >= 32) p->mp3_bitrate = i;
 	i=0;
-	get_field_as_long(s,file,"MP3_QUALITY", &i);
-	if (i > -1) p->mp3_quality = i;
+	if(get_field_as_long(s,file,"MP3_QUALITY", &i)) {;
+		if (i > -1 && i < 4) p->mp3_quality = i;
+	}
 	i=0;
 	get_field_as_long(s,file,"WINDOW_WIDTH", &i);
 	if (i >= 200) p->main_window_width = i;
@@ -3075,21 +3110,33 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 	log_gen(__func__, LOG_INFO, "lame() Genre: %s Artist: %s Title: %s", genre, artist, title);
 
 	// nice lame -q 0 -v -V 0 $file #  && rm $file
+	//  --cbr -b 224
+	//  -v -V0 -b 190
+	//
 	int pos = 0;
 	const char *args[32];
 	args[pos++] = LAME_PRG;
 	args[pos++] = "--nohist";
 	args[pos++] = "-q";
 	args[pos++] = "0";
-	args[pos++] = "-V";
-	args[pos++] = "0";
 	args[pos++] = "--id3v2-only";
+	if(global_prefs->mp3_vbr) {
+		args[pos++] = "-V";
+		args[pos++] = "0";
+	} else {
+		args[pos++] = "--cbr";
+	}
+	args[pos++] = "-b";
+	int bitrate = mp3_quality_to_bitrate(global_prefs->mp3_quality,global_prefs->mp3_vbr);
 
-	char tracknum_text[3];
-	snprintf(tracknum_text, 3, "%d", tracknum);
+	char txt[3];
+	snprintf(txt, 3, "%d", bitrate);
+	args[pos++] = "-b";
+
+	snprintf(txt, 3, "%d", tracknum);
 	if ((tracknum > 0) && (tracknum < 100)) {
 		args[pos++] = "--tn";
-		args[pos++] = tracknum_text;
+		args[pos++] = txt;
 	}
 	if ((artist != NULL) && (strlen(artist) > 0)) {
 		args[pos++] = "--ta";
@@ -3460,9 +3507,13 @@ static int exec_with_output(const char *args[], int toread, pid_t * p)
 
 	// i'm the parent
 	log_gen(__func__, LOG_INFO, "%d started: %s ", *p, args[0]);
-	// int count;
-	// for (count = 1; args[count] != NULL; count++) log_gen(__func__, LOG_INFO, "%s ", args[count]);
-
+	int count;
+	printf("ARGS:");
+	for (count = 1; args[count] != NULL; count++) {
+		printf("%s|",args[count]);
+		//log_gen(__func__, LOG_INFO, "%s ", args[count]);
+	}
+	printf("\n");
 	// close the side of the pipe we don't need
 	close(pipefd[1]);
 	return pipefd[0];

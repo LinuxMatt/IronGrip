@@ -134,6 +134,7 @@ typedef struct _prefs {
     int rip_mp3;
     int mp3_vbr;
     int mp3_bitrate;
+    int mp3_quality;
     int main_window_width;
     int main_window_height;
     int eject_on_done;
@@ -1310,6 +1311,16 @@ static void on_mp3bitrate_value_changed(GtkRange * range, gpointer user_data)
 	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
 }
 
+static void on_mp3_quality_changed(GtkComboBox * combobox, gpointer user_data)
+{
+	// gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (combobox));
+	// printf("SELECTED INDEX=[%d]\n", index);
+
+	gchar * p_text = gtk_combo_box_get_active_text (GTK_COMBO_BOX (combobox));
+	// printf("TEXT=[%s]\n", p_text);
+	g_free(p_text);
+}
+
 static void on_pick_disc_changed(GtkComboBox * combobox, gpointer user_data)
 {
 	cddb_disc_t *disc = g_list_nth_data(disc_matches, gtk_combo_box_get_active(combobox));
@@ -2060,16 +2071,17 @@ static GtkWidget *create_prefs(void)
 	tooltips = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tooltips, mp3_vbr, _("Better quality for the same size."), NULL);
 
-	GtkWidget *p_combo = gtk_combo_box_new_text();
-	gtk_widget_show(p_combo);
+	GtkWidget *combo_mp3_quality = gtk_combo_box_new_text();
+	gtk_widget_show(combo_mp3_quality);
 	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, p_combo, _("Choosing 'High quality' is recommended."), NULL);
-	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "Low quality");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "Good quality");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "High quality");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (p_combo), "Maximum quality");
-	gtk_combo_box_set_active (GTK_COMBO_BOX (p_combo), 2);
-	gtk_box_pack_start(GTK_BOX(vbox2), p_combo, FALSE, FALSE, 0);
+	gtk_tooltips_set_tip(tooltips, combo_mp3_quality, _("Choosing 'High quality' is recommended."), NULL);
+	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Low quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Good quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "High quality");
+	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Maximum quality");
+	gtk_combo_box_set_active (GTK_COMBO_BOX (combo_mp3_quality), 2);
+	gtk_box_pack_start(GTK_BOX(vbox2), combo_mp3_quality, FALSE, FALSE, 0);
+	g_signal_connect((gpointer) combo_mp3_quality, "changed", G_CALLBACK(on_mp3_quality_changed), NULL);
 
 	GtkWidget *hbox9 = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox9);
@@ -2243,6 +2255,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, rip_wav, "rip_wav");
 	HOOKUP(prefs, mp3_vbr, "mp3_vbr");
 	HOOKUP(prefs, mp3bitrate, "mp3bitrate");
+	HOOKUP(prefs, combo_mp3_quality, "combo_mp3_quality");
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
 	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
 	return prefs;
@@ -2306,6 +2319,7 @@ static void disable_mp3_widgets(void)
 	gtk_widget_set_sensitive(LKP_PREF("mp3_vbr"), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl"), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF("mp3bitrate"), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF("combo_mp3_quality"), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl_2"), FALSE);
 }
 
@@ -2314,6 +2328,7 @@ static void enable_mp3_widgets(void)
 	gtk_widget_set_sensitive(LKP_PREF("mp3_vbr"), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl"), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF("mp3bitrate"), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF("combo_mp3_quality"), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl_2"), TRUE);
 }
 
@@ -2394,6 +2409,7 @@ static prefs *get_default_prefs()
 	p->main_window_width = 600;
 	p->make_playlist = 1;
 	p->mp3_bitrate = 10;
+	p->mp3_quality = 2; // 0:low, 1:good, 2:high, 3:max
 	p->mp3_vbr = 1;
 	p->rip_mp3 = 1;
 	p->rip_wav = 0;
@@ -2434,6 +2450,7 @@ static void set_widgets_from_prefs(prefs * p)
 
 	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(LKP_PREF("music_dir")), prefs_get_music_dir(p));
 	gtk_range_set_value(GTK_RANGE(LKP_PREF("mp3bitrate")), p->mp3_bitrate);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_PREF("combo_mp3_quality")), p->mp3_quality);
 
 	set_pref_toggle("do_cddb_updates", p->do_cddb_updates);
 	set_pref_toggle("do_log", p->do_log);
@@ -2474,6 +2491,7 @@ static void get_prefs_from_widgets(prefs * p)
 	p->music_dir = g_strdup(tocopy);
 	g_free(tocopy);
 	p->mp3_bitrate = (int)gtk_range_get_value(GTK_RANGE(LKP_PREF("mp3bitrate")));
+	p->mp3_quality = gtk_combo_box_get_active(GTK_COMBO_BOX(LKP_PREF("combo_mp3_quality")));
 
 	p->cdrom = get_pref_text("cdrom");
 	p->format_music = get_pref_text("format_music");
@@ -2533,6 +2551,7 @@ static void save_prefs(prefs * p)
 	fprintf(fd, "RIP_MP3=%d\n", p->rip_mp3);
 	fprintf(fd, "MP3_VBR=%d\n", p->mp3_vbr);
 	fprintf(fd, "MP3_BITRATE=%d\n", p->mp3_bitrate);
+	fprintf(fd, "MP3_QUALITY=%d\n", p->mp3_quality);
 	fprintf(fd, "WINDOW_WIDTH=%d\n", p->main_window_width);
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
 	fprintf(fd, "EJECT=%d\n", p->eject_on_done);
@@ -2573,6 +2592,9 @@ static void load_prefs(prefs * p)
 	int i = 0;
 	get_field_as_long(s,file,"MP3_BITRATE", &i);
 	if (i >= 32) p->mp3_bitrate = i;
+	i=0;
+	get_field_as_long(s,file,"MP3_QUALITY", &i);
+	if (i > -1) p->mp3_quality = i;
 	i=0;
 	get_field_as_long(s,file,"WINDOW_WIDTH", &i);
 	if (i >= 200) p->main_window_width = i;

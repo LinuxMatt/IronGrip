@@ -19,3 +19,6 @@
 # translation template
 po/irongrip.po
 
+# vi files
+.exrc
+

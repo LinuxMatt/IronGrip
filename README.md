@@ -50,6 +50,10 @@ Build dependencies
 First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...).
 To compile the source, you may also need the -dev or -devel versions of GTK+ and libcddb.
 On Ubuntu, these packages are called libgtk2.0-dev and libcddb2-dev.
+- sudo apt-get install automake
+- sudo apt-get install intltool
+- sudo apt-get install libgtk2.0-dev
+- sudo apt-get install libcddb2-dev
 
 Compiling
 ---------

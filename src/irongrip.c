@@ -112,6 +112,30 @@
 #define HOOKUP(component,widget,name) g_object_set_data_full (G_OBJECT (component), name,  gtk_widget_ref (widget), (GDestroyNotify) gtk_widget_unref)
 #define HOOKUP_OBJ_NOREF(component,widget,name) g_object_set_data (G_OBJECT (component), name, widget)
 
+#define LKP_MAIN(x) lookup_widget(win_main, x)
+#define LKP_PREF(x) lookup_widget(win_prefs, x)
+#define DIALOG_INFO_OK(...) show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_OK,  __VA_ARGS__)
+#define DIALOG_WARNING_OK(...) show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,  __VA_ARGS__)
+#define DIALOG_ERROR_OK(...) show_dialog(GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,  __VA_ARGS__)
+#define DIALOG_INFO_CLOSE(...) show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
+#define DIALOG_WARNING_CLOSE(...) show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
+#define GET_PREF_TEXT(x) gtk_entry_get_text(GTK_ENTRY(LKP_PREF(x)))
+#define GET_MAIN_TEXT(x) gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(x)))
+#define CLEAR_TEXT(x) gtk_entry_set_text(GTK_ENTRY(LKP_MAIN(x)), "")
+
+#define LOG_NONE	0	//!< Absolutely quiet. DO NOT USE.
+#define LOG_FATAL	1	//!< Only errors are reported.
+#define LOG_WARN	2	//!< Warnings.
+#define LOG_INFO	3	//!< Informational messages
+#define LOG_TRACE	4	//!< Trace messages. Debug only.
+#define LOG_DEBUG	5	//!< Verbose debugging.
+
+#define SANITIZE(x) trim_chars(x, BADCHARS); trim_whitespace(x)
+#define TOGGLE_ACTIVE(x,y) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lookup_widget(win_main, x)), y)
+#define WIDGET_SHOW(x) gtk_widget_show(lookup_widget(win_main, x))
+
+
+
 enum {
     COL_RIPTRACK,
     COL_TRACKNUM,
@@ -133,7 +157,6 @@ typedef struct _prefs {
     int rip_wav;
     int rip_mp3;
     int mp3_vbr;
-    int mp3_bitrate;
     int mp3_quality;
     int main_window_width;
     int main_window_height;
@@ -151,50 +174,70 @@ typedef struct _prefs {
 
 typedef struct _shared {
 	FILE * playlist_wav;
-	FILE *playlist_mp3;
 	FILE *log_fd;
-	int rip_tracks_completed;
-	bool allDone; /* for stopping the tracking thread */
-	double rip_percent;
-	double mp3_percent;
+	FILE *playlist_mp3;
+	GCond *available;
+	GList *disc_matches;
+	GMutex *barrier;
+	GThread *cddb_query_thread;
+	GThread *encoder;
+	GThread *ripper;
+	GThread *tracker;
 	bool aborted; /* for canceling */
+	bool allDone; /* for stopping the tracking thread */
+	bool overwriteAll;
+	bool overwriteNone;
+	bool working; /* ripping or encoding, so that can know not to clear the tracklist on eject */
+	cddb_conn_t * cddb_query_thread_conn;
+	cddb_disc_t * cddb_query_thread_disc;
+	double mp3_percent;
+	double rip_percent;
+	gboolean track_format[100];
 	int cddb_query_thread_num_matches;
+	int cddb_query_thread_running;
+	int counter;
+	int encode_tracks_completed;
+	int numCdparanoiaFailed;
+	int numCdparanoiaOk;
+	int numLameFailed;
+	int numLameOk;
+	int rip_tracks_completed;
+	int tracks_to_rip;
+	pid_t cdparanoia_pid;
+	pid_t lame_pid;
 } shared;
 
-static GCond * available = NULL;
-static GList * disc_matches = NULL;
-static GMutex * barrier = NULL;
-static GThread * cddb_query_thread;
-static GThread * encoder;
-static GThread * ripper;
-static GThread * tracker;
-static GtkWidget * win_main = NULL;
-static GtkWidget * win_prefs = NULL;
-static bool overwriteAll;
-static bool overwriteNone;
-static bool working; /* ripping or encoding, so that can know not to clear the tracklist on eject */
-static cddb_conn_t * cddb_query_thread_conn;
-static cddb_disc_t * cddb_query_thread_disc;
-static gboolean track_format[100];
-static int cddb_query_thread_running;
-static int counter;
-static int encode_tracks_completed;
-static int numCdparanoiaFailed;
-static int numCdparanoiaOk;
-static int numLameFailed;
-static int numLameOk;
-static int tracks_to_rip;
-static pid_t cdparanoia_pid;
-static pid_t lame_pid;
+// Global objects
+static GtkWidget *win_main = NULL;
+static GtkWidget *win_prefs = NULL;
 static prefs *global_prefs = NULL;
 static shared *global_data = NULL;
 
-#define LOG_NONE	0	//!< Absolutely quiet. DO NOT USE.
-#define LOG_FATAL	1	//!< Only errors are reported.
-#define LOG_WARN	2	//!< Warnings.
-#define LOG_INFO	3	//!< Informational messages
-#define LOG_TRACE	4	//!< Trace messages. Debug only.
-#define LOG_DEBUG	5	//!< Verbose debugging.
+
+// Functions Prototypes
+static GtkWidget *ripping_bar( GtkWidget *table, char *name, int y);
+static GtkWidget* create_prefs (void);
+static bool prefs_are_valid(void);
+static bool string_has_slashes(const char* string);
+static char * prefs_get_music_dir(prefs * p);
+static gchar* get_config_path(const gchar *file_suffix);
+static gpointer encode_thread(gpointer data);
+static gpointer track_thread(gpointer data);
+static int exec_with_output(const char * args[], int toread, pid_t * p);
+static int is_valid_port_number(int number);
+static void disable_all_main_widgets(void);
+static void disable_mp3_widgets(void);
+static void dorip();
+static void enable_all_main_widgets(void);
+static void enable_mp3_widgets(void);
+static void get_prefs_from_widgets(prefs * p);
+static void on_cancel_clicked(GtkButton * button, gpointer user_data);
+static void save_prefs(prefs * p);
+static void set_status(char *text);
+static void set_widgets_from_prefs(prefs * p);
+static void sigchld();
+
+
 
 /** Write current time in the log file. */
 static void log_time()
@@ -416,87 +459,6 @@ static void fatalError(const char *message)
 {
 	fprintf(stderr, "Fatal error: %s\n", message);
 	exit(-1);
-}
-
-// converts a gtk slider's integer range to a meaningful bitrate
-// NOTE: i grabbed these bitrates from the list in the LAME man page
-// and from http://wiki.hydrogenaudio.org/index.php?title=LAME#VBR_.28variable_bitrate.29_settings
-static int int_to_bitrate(int i, bool vbr)
-{
-	switch (i) {
-	case 0:
-		if (vbr)
-			return 65;
-		else
-			return 32;
-	case 1:
-		if (vbr)
-			return 65;
-		else
-			return 40;
-	case 2:
-		if (vbr)
-			return 65;
-		else
-			return 48;
-	case 3:
-		if (vbr)
-			return 65;
-		else
-			return 56;
-	case 4:
-		if (vbr)
-			return 85;
-		else
-			return 64;
-	case 5:
-		if (vbr)
-			return 100;
-		else
-			return 80;
-	case 6:
-		if (vbr)
-			return 115;
-		else
-			return 96;
-	case 7:
-		if (vbr)
-			return 130;
-		else
-			return 112;
-	case 8:
-		if (vbr)
-			return 165;
-		else
-			return 128;
-	case 9:
-		if (vbr)
-			return 175;
-		else
-			return 160;
-	case 10:
-		if (vbr)
-			return 190;
-		else
-			return 192;
-	case 11:
-		if (vbr)
-			return 225;
-		else
-			return 224;
-	case 12:
-		if (vbr)
-			return 245;
-		else
-			return 256;
-	case 13:
-		if (vbr)
-			return 245;
-		else
-			return 320;
-	}
-	log_gen(__func__, LOG_WARN, "int_to_bitrate() called with bad parameter (%d)", i);
-	return 32;
 }
 
 static int mp3_quality_to_bitrate(int quality, bool vbr)
@@ -782,7 +744,6 @@ static void trim_whitespace(char *str)
 		str[i] = '\0';
 	}
 }
-#define SANITIZE(x) trim_chars(x, BADCHARS); trim_whitespace(x)
 
 static GtkWidget *lookup_widget(GtkWidget * widget, const gchar * widget_name)
 {
@@ -799,16 +760,6 @@ static GtkWidget *lookup_widget(GtkWidget * widget, const gchar * widget_name)
 	return found_widget;
 }
 
-#define LKP_MAIN(x) lookup_widget(win_main, x)
-#define LKP_PREF(x) lookup_widget(win_prefs, x)
-#define DIALOG_INFO_OK(...) show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_OK,  __VA_ARGS__)
-#define DIALOG_WARNING_OK(...) show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,  __VA_ARGS__)
-#define DIALOG_ERROR_OK(...) show_dialog(GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,  __VA_ARGS__)
-#define DIALOG_INFO_CLOSE(...) show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
-#define DIALOG_WARNING_CLOSE(...) show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
-#define GET_PREF_TEXT(x) gtk_entry_get_text(GTK_ENTRY(LKP_PREF(x)))
-#define GET_MAIN_TEXT(x) gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(x)))
-
 static void show_dialog(GtkMessageType type, GtkButtonsType buttons, char *fmt, ...)  {
     va_list args;
     va_start(args,fmt);
@@ -819,8 +770,6 @@ static void show_dialog(GtkMessageType type, GtkButtonsType buttons, char *fmt, 
     gtk_widget_destroy (dialog);
     g_free(txt);
 }
-
-#define CLEAR_TEXT(x) gtk_entry_set_text(GTK_ENTRY(LKP_MAIN(x)), "")
 
 static void clear_widgets()
 {
@@ -898,7 +847,7 @@ static GtkTreeModel *create_model_from_disc(cddb_disc_t * disc)
 		GtkTreeIter iter;
 		gtk_list_store_append(store, &iter);
 		gtk_list_store_set(store, &iter,
-				   COL_RIPTRACK, track_format[cddb_track_get_number(track)],
+				   COL_RIPTRACK, global_data->track_format[cddb_track_get_number(track)],
 				   COL_TRACKNUM, cddb_track_get_number(track),
 				   COL_TRACKARTIST, track_artist,
 				   COL_TRACKTITLE, track_title,
@@ -927,37 +876,34 @@ static void eject_disc(char *cdrom)
 
 static gpointer cddb_query_thread_run(gpointer data)
 {
-	global_data->cddb_query_thread_num_matches = cddb_query(cddb_query_thread_conn, cddb_query_thread_disc);
+	global_data->cddb_query_thread_num_matches = cddb_query(global_data->cddb_query_thread_conn, global_data->cddb_query_thread_disc);
 	log_gen(__func__, LOG_INFO, "Got %d matches for CDDB QUERY.", global_data->cddb_query_thread_num_matches);
 	if (global_data->cddb_query_thread_num_matches == -1)
 		global_data->cddb_query_thread_num_matches = 0;
 
-	g_atomic_int_set(&cddb_query_thread_running, 0);
+	g_atomic_int_set(&global_data->cddb_query_thread_running, 0);
 	return NULL;
 }
-
-static void disable_all_main_widgets(void);
-static void enable_all_main_widgets(void);
 
 static GList *lookup_disc(cddb_disc_t * disc)
 {
 	// set up the connection to the cddb server
-	cddb_query_thread_conn = cddb_new();
-	if (cddb_query_thread_conn == NULL)
+	global_data->cddb_query_thread_conn = cddb_new();
+	if (global_data->cddb_query_thread_conn == NULL)
 		fatalError("cddb_new() failed. Out of memory?");
 
-	cddb_set_server_name(cddb_query_thread_conn, global_prefs->cddb_server_name);
-	cddb_set_server_port(cddb_query_thread_conn, global_prefs->cddb_port_number);
+	cddb_set_server_name(global_data->cddb_query_thread_conn, global_prefs->cddb_server_name);
+	cddb_set_server_port(global_data->cddb_query_thread_conn, global_prefs->cddb_port_number);
 
 	if (global_prefs->use_proxy) {
-		cddb_set_http_proxy_server_name(cddb_query_thread_conn, global_prefs->server_name);
-		cddb_set_http_proxy_server_port(cddb_query_thread_conn, global_prefs->port_number);
-		cddb_http_proxy_enable(cddb_query_thread_conn);
+		cddb_set_http_proxy_server_name(global_data->cddb_query_thread_conn, global_prefs->server_name);
+		cddb_set_http_proxy_server_port(global_data->cddb_query_thread_conn, global_prefs->port_number);
+		cddb_http_proxy_enable(global_data->cddb_query_thread_conn);
 	}
 	// query cddb to find similar discs
-	g_atomic_int_set(&cddb_query_thread_running, 1);
-	cddb_query_thread_disc = disc;
-	cddb_query_thread = g_thread_create(cddb_query_thread_run, NULL, TRUE, NULL);
+	g_atomic_int_set(&global_data->cddb_query_thread_running, 1);
+	global_data->cddb_query_thread_disc = disc;
+	global_data->cddb_query_thread = g_thread_create(cddb_query_thread_run, NULL, TRUE, NULL);
 
 	// show cddb update window
 	gdk_threads_enter();
@@ -967,7 +913,7 @@ static GList *lookup_disc(cddb_disc_t * disc)
 	gtk_label_set_text(GTK_LABEL(statusLbl), _("<b>Getting disc info from the internet...</b>"));
 	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
 
-	while (g_atomic_int_get(&cddb_query_thread_running) != 0) {
+	while (g_atomic_int_get(&global_data->cddb_query_thread_running) != 0) {
 		while (gtk_events_pending())
 			gtk_main_iteration();
 		Sleep(300);
@@ -981,19 +927,19 @@ static GList *lookup_disc(cddb_disc_t * disc)
 	int i;
 	for (i = 0; i < global_data->cddb_query_thread_num_matches; i++) {
 		cddb_disc_t *possible_match = cddb_disc_clone(disc);
-		if (!cddb_read(cddb_query_thread_conn, possible_match)) {
-			cddb_error_print(cddb_errno(cddb_query_thread_conn));
+		if (!cddb_read(global_data->cddb_query_thread_conn, possible_match)) {
+			cddb_error_print(cddb_errno(global_data->cddb_query_thread_conn));
 			fatalError("cddb_read() failed.");
 		}
 		matches = g_list_append(matches, possible_match);
 
 		// move to next match
 		if (i < global_data->cddb_query_thread_num_matches - 1) {
-			if (!cddb_query_next(cddb_query_thread_conn, disc))
+			if (!cddb_query_next(global_data->cddb_query_thread_conn, disc))
 				fatalError("Query index out of bounds.");
 		}
 	}
-	cddb_destroy(cddb_query_thread_conn);
+	cddb_destroy(global_data->cddb_query_thread_conn);
 	return matches;
 }
 
@@ -1029,9 +975,9 @@ static cddb_disc_t *read_disc(char *cdrom)
 			if (ioctl(fd, CDROMREADTOCENTRY, &te) == 0) {
 				if (te.cdte_ctrl & CDROM_DATA_TRACK) {
 					// track is a DATA track. make sure its "rip" box is not checked by default
-					track_format[i] = FALSE;
+					global_data->track_format[i] = FALSE;
 				} else {
-					track_format[i] = TRUE;
+					global_data->track_format[i] = TRUE;
 				}
 				cddb_track_t *track = cddb_track_new();
 				if (track == NULL) fatalError("cddb_track_new() failed. Out of memory?");
@@ -1053,8 +999,6 @@ end:
 	close(fd);
 	return disc;
 }
-
-#define TOGGLE_ACTIVE(x,y) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lookup_widget(win_main, x)), y)
 
 static void update_tracklist(cddb_disc_t * disc)
 {
@@ -1098,11 +1042,9 @@ static void update_tracklist(cddb_disc_t * disc)
 	g_object_unref(model);
 }
 
-#define WIDGET_SHOW(x) gtk_widget_show(lookup_widget(win_main, x))
-
 static void refresh(char *cdrom, int force)
 {
-	if (working) // don't do anything
+	if (global_data->working) // don't do anything
 		return;
 
 	if (!check_disc(cdrom) && !force) {
@@ -1121,20 +1063,20 @@ static void refresh(char *cdrom, int force)
 	if (!global_prefs->do_cddb_updates && !force)
 		return;
 
-	disc_matches = lookup_disc(disc);
+	global_data->disc_matches = lookup_disc(disc);
 	cddb_disc_destroy(disc);
-	if (disc_matches == NULL) {
+	if (global_data->disc_matches == NULL) {
 		log_gen(__func__, LOG_WARN, "No disc matches !");
 		return;
 	}
 	// fill in and show the album drop-down box
-	if (g_list_length(disc_matches) > 1) {
+	if (g_list_length(global_data->disc_matches) > 1) {
 		GtkListStore *store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
 		GtkTreeIter iter;
 		GList *curr;
 		cddb_disc_t *tempdisc;
 
-		for (curr = g_list_first(disc_matches); curr != NULL; curr = g_list_next(curr)) {
+		for (curr = g_list_first(global_data->disc_matches); curr != NULL; curr = g_list_next(curr)) {
 			char *artist = NULL;
 			char *title = NULL;
 
@@ -1152,7 +1094,7 @@ static void refresh(char *cdrom, int force)
 		WIDGET_SHOW("disc");
 		WIDGET_SHOW(WDG_PICK_DISC);
 	}
-	update_tracklist((cddb_disc_t *) g_list_nth_data(disc_matches, 0));
+	update_tracklist((cddb_disc_t *) g_list_nth_data(global_data->disc_matches, 0));
 }
 
 static gboolean for_each_row_deselect(GtkTreeModel * model, GtkTreePath * path, GtkTreeIter * iter, gpointer data)
@@ -1178,70 +1120,6 @@ static gboolean scan_on_startup(gpointer data)
     log_gen(__func__, LOG_INFO, "scan_on_startup");
     refresh(global_prefs->cdrom, 0);
     return (data != NULL);
-}
-
-static void show_aboutbox(void)
-{
-	GError* error = NULL;
-	GdkPixbuf* icon = NULL;
-	GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
-
-	gchar *license = PROGRAM_NAME
-					" is distributed under the GNU General Public Licence\n"
-					"version 2, please see COPYING file for the complete text.\n";
-
-	gchar* authors[] = { AUTHOR,
-						"",
-						"IronGrip is a fork of the Asunder program.",
-						"Many thanks to the authors and contributors",
-						"of the Asunder project.",
-						"",
-						"See file 'README.md' for details.",
-						NULL };
-
-	gchar* comments = N_("An application to save tracks from an Audio CD as WAV and/or MP3.");
-	gchar* copyright = {"Copyright 2005 Eric Lathrop (Asunder)\n"
-						"Copyright 2007 Andrew Smith (Asunder)\n"
-						"Copyright 2012 " AUTHOR};
-
-	gchar* name = PROGRAM_NAME;
-	gchar* version = VERSION;
-	gchar* website = HOMEPAGE;
-	gchar* website_label = website;
-
-	gdk_pixbuf_loader_write(loader, pixmaps_irongrip_png, pixmaps_irongrip_png_len, &error);
-	if (error) {
-		g_warning ("Unable to load logo : %s\n", error->message);
-		g_error_free (error);
-		return;
-	}
-	gdk_pixbuf_loader_close(loader,NULL);
-	icon = gdk_pixbuf_loader_get_pixbuf(loader);
-	if (!icon) {
-		return;
-	}
-
-	gtk_show_about_dialog (
-			GTK_WINDOW(LKP_MAIN("main")),
-			"authors", authors,
-			// "artists", artists,
-			"comments", comments,
-			"copyright", copyright,
-			// "documenters", documenters,
-			"logo", icon,
-			"name", name,
-			"program-name", name,
-			"version", version,
-			"website", website,
-			"website-label", website_label,
-			// "translator-credits", translators,
-			"license", license,
-			NULL);
-}
-
-static void on_about_clicked(GtkToolButton * toolbutton, gpointer user_data)
-{
-    show_aboutbox();
 }
 
 static gboolean on_year_focus_out_event(GtkWidget * widget, GdkEventFocus * event, gpointer user_data)
@@ -1321,22 +1199,11 @@ static void on_vbr_toggled(GtkToggleButton * togglebutton, gpointer user_data)
 {
 	/* update the displayed vbr, as it's different for vbr and non-vbr */
 	bool vbr = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(togglebutton));
-	// GtkRange *range = GTK_RANGE(LKP_PREF("mp3bitrate"));
-	//snprintf(bitrate, 8, _("%dKbps"), int_to_bitrate((int)gtk_range_get_value(range), vbr));
-
-	char bitrate[8];
 	gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (LKP_PREF("combo_mp3_quality")));
+	char bitrate[8];
 	snprintf(bitrate, 8, _("%d Kbps"), mp3_quality_to_bitrate(index, vbr));
 	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
 
-}
-
-static void on_mp3bitrate_value_changed(GtkRange * range, gpointer user_data)
-{
-	bool vbr = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(LKP_PREF("mp3_vbr")));
-	char bitrate[8];
-	snprintf(bitrate, 8, _("%dKbps"), int_to_bitrate((int)gtk_range_get_value(range), vbr));
-	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
 }
 
 static void on_mp3_quality_changed(GtkComboBox * combobox, gpointer user_data)
@@ -1357,20 +1224,15 @@ static void on_mp3_quality_changed(GtkComboBox * combobox, gpointer user_data)
 
 static void on_pick_disc_changed(GtkComboBox * combobox, gpointer user_data)
 {
-	cddb_disc_t *disc = g_list_nth_data(disc_matches, gtk_combo_box_get_active(combobox));
+	cddb_disc_t *disc = g_list_nth_data(global_data->disc_matches, gtk_combo_box_get_active(combobox));
 	update_tracklist(disc);
 }
 
-static GtkWidget* create_prefs (void);
 static void on_preferences_clicked(GtkToolButton * toolbutton, gpointer user_data)
 {
 	win_prefs = create_prefs();
 	gtk_widget_show(win_prefs);
 }
-
-static bool prefs_are_valid(void);
-static void get_prefs_from_widgets(prefs * p);
-static void save_prefs(prefs * p);
 
 static void on_prefs_response(GtkDialog * dialog, gint response_id, gpointer user_data)
 {
@@ -1383,7 +1245,6 @@ static void on_prefs_response(GtkDialog * dialog, gint response_id, gpointer use
 	gtk_widget_destroy(GTK_WIDGET(dialog));
 }
 
-static void set_widgets_from_prefs(prefs * p);
 static void on_prefs_show(GtkWidget * widget, gpointer user_data)
 {
 	set_widgets_from_prefs(global_prefs);
@@ -1410,8 +1271,6 @@ static void on_lookup_clicked(GtkToolButton * toolbutton, gpointer user_data)
 	gdk_threads_enter();
 }
 
-static void dorip();
-
 static bool lookup_cdparanoia()
 {
 	if (program_exists(CDPARANOIA_PRG)) {
@@ -1434,10 +1293,6 @@ static void on_rip_button_clicked(GtkButton * button, gpointer user_data)
 	if(!lookup_cdparanoia()) return;
 	dorip();
 }
-
-static void disable_mp3_widgets(void);
-static void enable_mp3_widgets(void);
-
 
 static void on_rip_mp3_toggled(GtkToggleButton * button, gpointer user_data)
 {
@@ -1532,7 +1387,6 @@ static void on_window_close(GtkWidget * widget, GdkEventFocus * event, gpointer 
 	save_prefs(global_prefs);
 	gtk_main_quit();
 }
-static gchar* get_config_path(const gchar *file_suffix);
 
 static void read_completion_file(GtkListStore * list, const char *name)
 {
@@ -1641,19 +1495,88 @@ static void add_completion(GtkWidget * entry)
 	gtk_list_store_set(GTK_LIST_STORE(model), &iter, 0, str, -1);
 }
 
-static GtkWidget *ripping_bar( GtkWidget *table, char *name, int y);
-static void on_cancel_clicked(GtkButton * button, gpointer user_data);
+static GdkPixbuf *LoadMainIcon()
+{
+	GError* error = NULL;
+	GdkPixbuf* icon = NULL;
+	GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+	gdk_pixbuf_loader_write(loader, pixmaps_irongrip_png, pixmaps_irongrip_png_len, &error);
+	if (error) {
+		g_warning ("Unable to load logo : %s\n", error->message);
+		g_error_free (error);
+		return NULL;
+	}
+	gdk_pixbuf_loader_close(loader,NULL);
+	icon = gdk_pixbuf_loader_get_pixbuf(loader);
+	return icon;
+}
+
+static void show_aboutbox(void)
+{
+	GdkPixbuf* icon = NULL;
+
+	gchar *license = PROGRAM_NAME
+					" is distributed under the GNU General Public Licence\n"
+					"version 2, please see COPYING file for the complete text.\n";
+
+	gchar* authors[] = { AUTHOR,
+						"",
+						"IronGrip is a fork of the Asunder program.",
+						"Many thanks to the authors and contributors",
+						"of the Asunder project.",
+						"",
+						"See file 'README.md' for details.",
+						NULL };
+
+	gchar* comments = N_("An application to save tracks from an Audio CD as WAV and/or MP3.");
+	gchar* copyright = {"Copyright 2005 Eric Lathrop (Asunder)\n"
+						"Copyright 2007 Andrew Smith (Asunder)\n"
+						"Copyright 2012 " AUTHOR};
+
+	gchar* name = PROGRAM_NAME;
+	gchar* version = VERSION;
+	gchar* website = HOMEPAGE;
+	gchar* website_label = website;
+
+	icon = LoadMainIcon();
+	if (!icon) {
+		return;
+	}
+	gtk_show_about_dialog (
+			GTK_WINDOW(LKP_MAIN("main")),
+			"authors", authors,
+			// "artists", artists,
+			"comments", comments,
+			"copyright", copyright,
+			// "documenters", documenters,
+			"logo", icon,
+			"name", name,
+			"program-name", name,
+			"version", version,
+			"website", website,
+			"website-label", website_label,
+			// "translator-credits", translators,
+			"license", license,
+			NULL);
+}
+
+static void on_about_clicked(GtkToolButton * toolbutton, gpointer user_data)
+{
+    show_aboutbox();
+}
 
 static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(main_win), PROGRAM_NAME " v." VERSION);
 	gtk_window_set_default_size(GTK_WINDOW(main_win), global_prefs->main_window_width, global_prefs->main_window_height);
-	GdkPixbuf *main_icon_pixbuf = gtk_icon_theme_load_icon ( gtk_icon_theme_get_default(), GTK_STOCK_CDROM, 32, 0, NULL);
+	// GdkPixbuf *main_icon_pixbuf = gtk_icon_theme_load_icon ( gtk_icon_theme_get_default(), GTK_STOCK_CDROM, 32, 0, NULL);
+	GdkPixbuf *main_icon_pixbuf = LoadMainIcon();
 	if (main_icon_pixbuf) {
 		gtk_window_set_icon(GTK_WINDOW(main_win), main_icon_pixbuf);
 		g_object_unref(main_icon_pixbuf);
 	}
+
 	GtkWidget *vbox1 = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(vbox1);
 	gtk_container_add(GTK_CONTAINER(main_win), vbox1);
@@ -1964,10 +1887,6 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(eject_on_done);
 	gtk_box_pack_start(GTK_BOX(vbox), eject_on_done, FALSE, FALSE, 5);
 
-	GtkWidget *hboxFill = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hboxFill);
-	gtk_box_pack_start(GTK_BOX(vbox), hboxFill, TRUE, TRUE, 0);
-
 	label = gtk_label_new(_("General"));
 	gtk_widget_show(label);
 	gtk_notebook_set_tab_label(GTK_NOTEBOOK(notebook1), gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook1), 0), label);
@@ -2053,7 +1972,7 @@ static GtkWidget *create_prefs(void)
 	/* END FILENAMES tab */
 
 	/* ENCODE tab */
-	vbox = gtk_vbox_new(FALSE, 5);
+	vbox = gtk_vbox_new(FALSE, 0);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
 	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
@@ -2086,7 +2005,7 @@ static GtkWidget *create_prefs(void)
 	/* MP3 */
 	GtkWidget *frame3 = gtk_frame_new(NULL);
 	gtk_widget_show(frame3);
-	gtk_box_pack_start(GTK_BOX(vbox), frame3, TRUE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), frame3, FALSE, FALSE, 0);
 
 	GtkWidget *alignment8 = gtk_alignment_new(0.5, 0.5, 1, 1);
 	gtk_widget_show(alignment8);
@@ -2105,6 +2024,14 @@ static GtkWidget *create_prefs(void)
 	tooltips = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tooltips, mp3_vbr, _("Better quality for the same size."), NULL);
 
+	GtkWidget *hboxcombo = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hboxcombo);
+	gtk_box_pack_start(GTK_BOX(vbox2), hboxcombo, FALSE, FALSE, 1);
+
+	label = gtk_label_new(_("Quality : "));
+	gtk_widget_show(label);
+	gtk_box_pack_start(GTK_BOX(hboxcombo), label, FALSE, FALSE, 0);
+
 	GtkWidget *combo_mp3_quality = gtk_combo_box_new_text();
 	gtk_widget_show(combo_mp3_quality);
 	tooltips = gtk_tooltips_new();
@@ -2114,7 +2041,7 @@ static GtkWidget *create_prefs(void)
 	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "High quality (recommended)");
 	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Maximum quality");
 	gtk_combo_box_set_active (GTK_COMBO_BOX (combo_mp3_quality), 2);
-	gtk_box_pack_start(GTK_BOX(vbox2), combo_mp3_quality, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(hboxcombo), combo_mp3_quality, FALSE, FALSE, 0);
 	g_signal_connect((gpointer) combo_mp3_quality, "changed", G_CALLBACK(on_mp3_quality_changed), NULL);
 
 	GtkWidget *hbox9 = gtk_hbox_new(FALSE, 0);
@@ -2125,16 +2052,6 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(label);
 	gtk_box_pack_start(GTK_BOX(hbox9), label, FALSE, FALSE, 0);
 	HOOKUP(prefs, label, "bitrate_lbl");
-
-	GtkWidget *mp3bitrate = gtk_hscale_new(GTK_ADJUSTMENT(gtk_adjustment_new(0, 0, 14, 1, 1, 1)));
-	//gtk_widget_show(mp3bitrate);
-	gtk_box_pack_start(GTK_BOX(hbox9), mp3bitrate, FALSE, FALSE, 5);
-	gtk_scale_set_draw_value(GTK_SCALE(mp3bitrate), FALSE);
-	gtk_scale_set_digits(GTK_SCALE(mp3bitrate), 0);
-	g_signal_connect((gpointer) mp3bitrate, "value_changed", G_CALLBACK(on_mp3bitrate_value_changed), NULL);
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, mp3bitrate, _("Higher bitrate is better quality but also bigger file. Most people use 192Kbps."), NULL);
-
 
 	char kbps_text[10];
 	snprintf(kbps_text, 10, _("%dKbps"), 32);
@@ -2251,10 +2168,6 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, log_file, "do_log");
 	g_free(lbl);
 
-	hboxFill = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hboxFill);
-	gtk_box_pack_start(GTK_BOX(vbox), hboxFill, TRUE, TRUE, 0);
-
 	label = gtk_label_new(_("Advanced"));
 	gtk_widget_show(label);
 	gtk_notebook_set_tab_label(GTK_NOTEBOOK(notebook1), gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook1), 3), label);
@@ -2288,7 +2201,6 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, format_playlist, "format_playlist");
 	HOOKUP(prefs, rip_wav, "rip_wav");
 	HOOKUP(prefs, mp3_vbr, "mp3_vbr");
-	HOOKUP(prefs, mp3bitrate, "mp3bitrate");
 	HOOKUP(prefs, combo_mp3_quality, "combo_mp3_quality");
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
 	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
@@ -2305,12 +2217,15 @@ static GtkWidget *ripping_bar( GtkWidget *table, char *name, int y) {
 	gtk_table_attach(GTK_TABLE(table), progress, 1, 2, y, y+1, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 5, 10);
 	return progress;
 }
+
 static void enable_widget(char *name) {
 	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
 }
+
 static void disable_widget(char *name) {
 	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
 }
+
 static void disable_all_main_widgets(void)
 {
 	gtk_widget_set_sensitive(LKP_MAIN("tracklist"), FALSE);
@@ -2352,7 +2267,6 @@ static void disable_mp3_widgets(void)
 {
 	gtk_widget_set_sensitive(LKP_PREF("mp3_vbr"), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl"), FALSE);
-	gtk_widget_set_sensitive(LKP_PREF("mp3bitrate"), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF("combo_mp3_quality"), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl_2"), FALSE);
 }
@@ -2361,7 +2275,6 @@ static void enable_mp3_widgets(void)
 {
 	gtk_widget_set_sensitive(LKP_PREF("mp3_vbr"), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl"), TRUE);
-	gtk_widget_set_sensitive(LKP_PREF("mp3bitrate"), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF("combo_mp3_quality"), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl_2"), TRUE);
 }
@@ -2386,13 +2299,6 @@ static prefs *new_prefs()
 static shared *new_shared_data()
 {
 	shared *p = g_malloc0(sizeof(shared));
-	p->rip_tracks_completed=0;
-	p->rip_percent = 0.0;
-	p->mp3_percent = 0.0;
-	p->aborted = false;
-	p->playlist_mp3 = NULL;
-	p->playlist_wav = NULL;
-	p->log_fd = NULL;
 	return p;
 }
 
@@ -2442,7 +2348,6 @@ static prefs *get_default_prefs()
 	p->main_window_height = 450;
 	p->main_window_width = 600;
 	p->make_playlist = 1;
-	p->mp3_bitrate = 10;
 	p->mp3_quality = 2; // 0:low, 1:good, 2:high, 3:max
 	p->mp3_vbr = 1;
 	p->rip_mp3 = 1;
@@ -2470,7 +2375,6 @@ static void set_pref_toggle(char *widget_name, int on_off)
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lookup_widget(win_prefs, widget_name)), on_off);
 }
 
-static char * prefs_get_music_dir(prefs * p);
 // sets up all of the widgets in the preferences dialog to
 // match the given prefs struct
 static void set_widgets_from_prefs(prefs * p)
@@ -2483,7 +2387,6 @@ static void set_widgets_from_prefs(prefs * p)
 	set_pref_text("server_name", p->server_name);
 
 	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(LKP_PREF("music_dir")), prefs_get_music_dir(p));
-	gtk_range_set_value(GTK_RANGE(LKP_PREF("mp3bitrate")), p->mp3_bitrate);
 	gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_PREF("combo_mp3_quality")), p->mp3_quality);
 
 	set_pref_toggle("do_cddb_updates", p->do_cddb_updates);
@@ -2524,7 +2427,6 @@ static void get_prefs_from_widgets(prefs * p)
 	gchar *tocopy = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(LKP_PREF("music_dir")));
 	p->music_dir = g_strdup(tocopy);
 	g_free(tocopy);
-	p->mp3_bitrate = (int)gtk_range_get_value(GTK_RANGE(LKP_PREF("mp3bitrate")));
 	p->mp3_quality = gtk_combo_box_get_active(GTK_COMBO_BOX(LKP_PREF("combo_mp3_quality")));
 
 	p->cdrom = get_pref_text("cdrom");
@@ -2584,7 +2486,6 @@ static void save_prefs(prefs * p)
 	fprintf(fd, "RIP_WAV=%d\n", p->rip_wav);
 	fprintf(fd, "RIP_MP3=%d\n", p->rip_mp3);
 	fprintf(fd, "MP3_VBR=%d\n", p->mp3_vbr);
-	fprintf(fd, "MP3_BITRATE=%d\n", p->mp3_bitrate);
 	fprintf(fd, "MP3_QUALITY=%d\n", p->mp3_quality);
 	fprintf(fd, "WINDOW_WIDTH=%d\n", p->main_window_width);
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
@@ -2600,8 +2501,6 @@ static void save_prefs(prefs * p)
 	fprintf(fd, "CDDB_PORT=%d\n", p->cddb_port_number);
 	fclose(fd);
 }
-
-static int is_valid_port_number(int number);
 
 // load the prefereces from the config file into the given prefs struct
 static void load_prefs(prefs * p)
@@ -2624,9 +2523,6 @@ static void load_prefs(prefs * p)
 	get_field_as_long(s,file,"MP3_VBR", &(p->mp3_vbr));
 
 	int i = 0;
-	get_field_as_long(s,file,"MP3_BITRATE", &i);
-	if (i >= 32) p->mp3_bitrate = i;
-	i=0;
 	if(get_field_as_long(s,file,"MP3_QUALITY", &i)) {;
 		if (i > -1 && i < 4) p->mp3_quality = i;
 	}
@@ -2687,8 +2583,6 @@ static int is_valid_port_number(int number)
 		return 0;
 }
 
-static bool string_has_slashes(const char* string);
-
 static bool prefs_are_valid(void)
 {
 	bool somethingWrong = false;
@@ -2741,8 +2635,8 @@ static bool confirmOverwrite(const char *pathAndName)
 {
 	// dont'ask yet
 	return true;
-	if (overwriteAll) return true;
-	if (overwriteNone) return false;
+	if (global_data->overwriteAll) return true;
+	if (global_data->overwriteNone) return false;
 
 	GtkWidget *dialog = gtk_dialog_new_with_buttons(_("Overwrite?"),
 					     GTK_WINDOW(win_main),
@@ -2767,9 +2661,9 @@ static bool confirmOverwrite(const char *pathAndName)
 	int rc = gtk_dialog_run(GTK_DIALOG(dialog));
 	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checkbox))) {
 		if (rc == GTK_RESPONSE_ACCEPT)
-			overwriteAll = true;
+			global_data->overwriteAll = true;
 		else
-			overwriteNone = true;
+			global_data->overwriteNone = true;
 	}
 	gtk_widget_destroy(dialog);
 
@@ -2785,29 +2679,30 @@ static bool confirmOverwrite(const char *pathAndName)
 static void abort_threads()
 {
     global_data->aborted = true;
-    if (cdparanoia_pid != 0) {
-        kill(cdparanoia_pid, SIGKILL);
+    if (global_data->cdparanoia_pid != 0) {
+        kill(global_data->cdparanoia_pid, SIGKILL);
 	}
-    if (lame_pid != 0) {
-        kill(lame_pid, SIGKILL);
+    if (global_data->lame_pid != 0) {
+        kill(global_data->lame_pid, SIGKILL);
 	}
     /* wait until all the worker threads are done */
-    while (cdparanoia_pid != 0 || lame_pid != 0) {
+    while (global_data->cdparanoia_pid != 0 || global_data->lame_pid != 0) {
         Sleep(300);
-		log_gen(__func__, LOG_INFO, "w1 cdparanoia=%d lame=%d", cdparanoia_pid, lame_pid);
+		log_gen(__func__, LOG_INFO, "w1 cdparanoia=%d lame=%d", global_data->cdparanoia_pid, global_data->lame_pid);
     }
-    g_cond_signal(available);
-    g_thread_join(ripper);
-    g_thread_join(encoder);
-    g_thread_join(tracker);
+    g_cond_signal(global_data->available);
+    g_thread_join(global_data->ripper);
+    g_thread_join(global_data->encoder);
+    g_thread_join(global_data->tracker);
     // gdk_flush();
-    working = false;
-    show_completed_dialog(numCdparanoiaOk + numLameOk, numCdparanoiaFailed + numLameFailed);
+    global_data->working = false;
+    show_completed_dialog(global_data->numCdparanoiaOk + global_data->numLameOk, global_data->numCdparanoiaFailed + global_data->numLameFailed);
     gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
     gtk_widget_hide(LKP_MAIN("win_ripping"));
 	gtk_widget_show(LKP_MAIN("scroll"));
 	enable_all_main_widgets();
 }
+
 static void on_cancel_clicked(GtkButton * button, gpointer user_data)
 {
 	log_gen(__func__, LOG_WARN, "on_cancel_clicked !!");
@@ -2834,9 +2729,6 @@ void make_playlist(const char *filename, FILE ** file)
 	}
 }
 
-static int exec_with_output(const char * args[], int toread, pid_t * p);
-static void sigchld();
-
 // uses cdparanoia to rip a WAV track from a cdrom
 //
 // cdrom    - the path to the cdrom device
@@ -2849,7 +2741,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 	snprintf(trackstring, 3, "%d", tracknum);
 	const char *args[] = { CDPARANOIA_PRG, "-e", "-d", cdrom, trackstring, filename, NULL };
 
-	int fd = exec_with_output(args, STDERR_FILENO, &cdparanoia_pid);
+	int fd = exec_with_output(args, STDERR_FILENO, &global_data->cdparanoia_pid);
 	fd_set readfds;
 	FD_ZERO(&readfds);
 	FD_SET(fd, &readfds);
@@ -2914,12 +2806,10 @@ cleanup:
 	close(fd);
 	sigchld();
 	/* don't go on until the signal for the previous call is handled */
-	if (cdparanoia_pid != 0) {
-		kill(cdparanoia_pid, SIGKILL);
+	if (global_data->cdparanoia_pid != 0) {
+		kill(global_data->cdparanoia_pid, SIGKILL);
 	}
 }
-
-static void set_status(char *text);
 
 // the thread that handles ripping tracks to WAV files
 static gpointer rip_thread(gpointer data)
@@ -2977,10 +2867,10 @@ static gpointer rip_thread(gpointer data)
 			global_data->rip_tracks_completed++;
 			log_gen(__func__, LOG_INFO, "NOW rip_tracks_completed = %d", global_data->rip_tracks_completed);
 		}
-		g_mutex_lock(barrier);
-		counter++;
-		g_mutex_unlock(barrier);
-		g_cond_signal(available);
+		g_mutex_lock(global_data->barrier);
+		global_data->counter++;
+		g_mutex_unlock(global_data->barrier);
+		g_cond_signal(global_data->available);
 
 		if (global_data->aborted) g_thread_exit(NULL);
 		rowsleft = gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter);
@@ -2994,9 +2884,6 @@ static gpointer rip_thread(gpointer data)
 	return NULL;
 }
 
-static gpointer encode_thread(gpointer data);
-static gpointer track_thread(gpointer data);
-
 static void set_status(char *text) {
 	GtkWidget *s = LKP_MAIN("statusLbl");
 	gtk_label_set_text(GTK_LABEL(s), _(text));
@@ -3005,19 +2892,19 @@ static void set_status(char *text) {
 
 static void reset_counters()
 {
-	working = true;
+	global_data->working = true;
 	global_data->aborted = false;
 	global_data->allDone = false;
-	counter = 0;
-	barrier = g_mutex_new();
-	available = g_cond_new();
+	global_data->counter = 0;
+	global_data->barrier = g_mutex_new();
+	global_data->available = g_cond_new();
 	global_data->mp3_percent = 0.0;
 	global_data->rip_tracks_completed = 0;
-	encode_tracks_completed = 0;
-	numCdparanoiaFailed = 0;
-	numLameFailed = 0;
-	numCdparanoiaOk = 0;
-	numLameOk = 0;
+	global_data->encode_tracks_completed = 0;
+	global_data->numCdparanoiaFailed = 0;
+	global_data->numLameFailed = 0;
+	global_data->numCdparanoiaOk = 0;
+	global_data->numLameOk = 0;
 	global_data->rip_percent = 0.0;
 }
 
@@ -3037,8 +2924,8 @@ static void dorip()
 	char *albumdir = parse_format(global_prefs->format_albumdir, 0, albumyear, albumartist, albumtitle, albumgenre, NULL);
 	char *playlist = parse_format(global_prefs->format_playlist, 0, albumyear, albumartist, albumtitle, albumgenre, NULL);
 
-	overwriteAll = false;
-	overwriteNone = false;
+	global_data->overwriteAll = false;
+	global_data->overwriteNone = false;
 
 	set_status("make sure there's at least one format to rip to");
 	if (!global_prefs->rip_wav && !global_prefs->rip_mp3) {
@@ -3049,14 +2936,14 @@ static void dorip()
 	}
 	set_status("make sure there's some tracks to rip");
 	rowsleft = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter);
-	tracks_to_rip = 0;
+	global_data->tracks_to_rip = 0;
 	while (rowsleft) {
 		int riptrack;
 		gtk_tree_model_get(GTK_TREE_MODEL(store), &iter, COL_RIPTRACK, &riptrack, -1);
-		if (riptrack) tracks_to_rip++;
+		if (riptrack) global_data->tracks_to_rip++;
 		rowsleft = gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter);
 	}
-	if (tracks_to_rip == 0) {
+	if (global_data->tracks_to_rip == 0) {
 		DIALOG_ERROR_OK(_("No tracks were selected for ripping/encoding. Please select at least one track."));
 		g_free(albumdir);
 		g_free(playlist);
@@ -3095,14 +2982,14 @@ static void dorip()
 	g_free(albumdir);
 	g_free(playlist);
 
-	set_status("Working...");
+	set_status("global_data->Working...");
 	disable_all_main_widgets();
 	gtk_widget_show(LKP_MAIN("win_ripping"));
 	gtk_widget_hide(LKP_MAIN("scroll"));
 
-	ripper = g_thread_create(rip_thread, NULL, TRUE, NULL);
-	encoder = g_thread_create(encode_thread, NULL, TRUE, NULL);
-	tracker = g_thread_create(track_thread, NULL, TRUE, NULL);
+	global_data->ripper = g_thread_create(rip_thread, NULL, TRUE, NULL);
+	global_data->encoder = g_thread_create(encode_thread, NULL, TRUE, NULL);
+	global_data->tracker = g_thread_create(track_thread, NULL, TRUE, NULL);
 }
 
 static void lamehq(int tracknum, char *artist, char *album, char *title, char *genre, char *year, char *wavfilename, char *mp3filename)
@@ -3164,7 +3051,7 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 	args[pos++] = mp3filename;
 	args[pos++] = NULL;
 
-	int fd = exec_with_output(args, STDERR_FILENO, &lame_pid);
+	int fd = exec_with_output(args, STDERR_FILENO, &global_data->lame_pid);
 	int size = 0;
 	do {
 		char buf[256];
@@ -3230,12 +3117,12 @@ static gpointer encode_thread(gpointer data)
 	gboolean rowsleft = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter);
 
 	while (rowsleft) {
-		g_mutex_lock(barrier);
-		while ((counter < 1) && (!global_data->aborted)) {
-			g_cond_wait(available, barrier);
+		g_mutex_lock(global_data->barrier);
+		while ((global_data->counter < 1) && (!global_data->aborted)) {
+			g_cond_wait(global_data->available, global_data->barrier);
 		}
-		counter--;
-		g_mutex_unlock(barrier);
+		global_data->counter--;
+		g_mutex_unlock(global_data->barrier);
 		if (global_data->aborted) g_thread_exit(NULL);
 
 		int riptrack;
@@ -3308,7 +3195,7 @@ static gpointer encode_thread(gpointer data)
 			g_free(mp3filename);
 
 			global_data->mp3_percent = 0.0;
-			encode_tracks_completed++;
+			global_data->encode_tracks_completed++;
 		}
 		if (global_data->aborted) g_thread_exit(NULL);
 
@@ -3325,23 +3212,23 @@ static gpointer encode_thread(gpointer data)
 		fclose(global_data->playlist_mp3);
 	global_data->playlist_mp3 = NULL;
 
-	g_mutex_free(barrier);
-	barrier = NULL;
-	g_cond_free(available);
-	available = NULL;
+	g_mutex_free(global_data->barrier);
+	global_data->barrier = NULL;
+	g_cond_free(global_data->available);
+	global_data->available = NULL;
 
 	log_gen(__func__, LOG_INFO, "rip_percent= %f %%", global_data->rip_percent);
 	/* wait until all the worker threads are done */
-	while (cdparanoia_pid != 0 || lame_pid != 0) {
+	while (global_data->cdparanoia_pid != 0 || global_data->lame_pid != 0) {
 		printf("w2\n");
 		Sleep(300);
 	}
 	Sleep(200);
 	log_gen(__func__, LOG_INFO, "Waking up to allDone");
 	global_data->allDone = true;		// so the tracker thread will exit
-	working = false;
+	global_data->working = false;
 	gdk_threads_enter();
-	show_completed_dialog(numCdparanoiaOk + numLameOk, numCdparanoiaFailed + numLameFailed);
+	show_completed_dialog(global_data->numCdparanoiaOk + global_data->numLameOk, global_data->numCdparanoiaFailed + global_data->numLameFailed);
 	gtk_widget_hide(LKP_MAIN("win_ripping"));
 	gtk_widget_show(LKP_MAIN("scroll"));
 	enable_all_main_widgets();
@@ -3388,15 +3275,15 @@ static gpointer track_thread(gpointer data)
 			continue;
 		}
 		started = true;
-		prip = (global_data->rip_tracks_completed + global_data->rip_percent) / tracks_to_rip;
-		snprintf(srip, 32, "%02.2f%% (%d/%d)", (prip * 100), (global_data->rip_tracks_completed < tracks_to_rip) ? (global_data->rip_tracks_completed + 1) : tracks_to_rip, tracks_to_rip);
+		prip = (global_data->rip_tracks_completed + global_data->rip_percent) / global_data->tracks_to_rip;
+		snprintf(srip, 32, "%02.2f%% (%d/%d)", (prip * 100), (global_data->rip_tracks_completed < global_data->tracks_to_rip) ? (global_data->rip_tracks_completed + 1) : global_data->tracks_to_rip, global_data->tracks_to_rip);
 		if(prip>1.0) {
-			log_gen(__func__, LOG_WARN, "prip overflow=%.2f%% completed=%d rip=%.2f%% remain=%d", prip, global_data->rip_tracks_completed, global_data->rip_percent, tracks_to_rip);
+			log_gen(__func__, LOG_WARN, "prip overflow=%.2f%% completed=%d rip=%.2f%% remain=%d", prip, global_data->rip_tracks_completed, global_data->rip_percent, global_data->tracks_to_rip);
 			prip=1.0;
 		}
 		if (parts > 1) {
-			pencode = ((double)encode_tracks_completed / (double)tracks_to_rip) + ((global_data->mp3_percent) / (parts - 1) / tracks_to_rip);
-			snprintf(sencode, 13, "%d%% (%d/%d)", (int)(pencode * 100), (encode_tracks_completed < tracks_to_rip) ? (encode_tracks_completed + 1) : tracks_to_rip, tracks_to_rip);
+			pencode = ((double)global_data->encode_tracks_completed / (double)global_data->tracks_to_rip) + ((global_data->mp3_percent) / (parts - 1) / global_data->tracks_to_rip);
+			snprintf(sencode, 13, "%d%% (%d/%d)", (int)(pencode * 100), (global_data->encode_tracks_completed < global_data->tracks_to_rip) ? (global_data->encode_tracks_completed + 1) : global_data->tracks_to_rip, global_data->tracks_to_rip);
 			ptotal = prip / parts + pencode * (parts - 1) / parts;
 		} else {
 			ptotal = prip;
@@ -3441,9 +3328,9 @@ static void sigchld()
 	int status = -1;
 	pid_t pid = wait(&status);
 	log_gen(__func__, LOG_INFO, "waited for %d, status=%d (know about wav %d, mp3 %d)",
-			pid, status, cdparanoia_pid, lame_pid);
+			pid, status, global_data->cdparanoia_pid, global_data->lame_pid);
 
-	if (pid != cdparanoia_pid && pid != lame_pid) {
+	if (pid != global_data->cdparanoia_pid && pid != global_data->lame_pid) {
 		log_gen(__func__, LOG_FATAL, "unknown pid, report bug please");
 	}
 	if (WIFEXITED(status)) {
@@ -3457,22 +3344,22 @@ static void sigchld()
 	}
 
 	if (status != 0) {
-		if (pid == cdparanoia_pid) {
-			cdparanoia_pid = 0;
+		if (pid == global_data->cdparanoia_pid) {
+			global_data->cdparanoia_pid = 0;
 			if (global_prefs->rip_wav)
-				numCdparanoiaFailed++;
-		} else if (pid == lame_pid) {
-			lame_pid = 0;
-			numLameFailed++;
+				global_data->numCdparanoiaFailed++;
+		} else if (pid == global_data->lame_pid) {
+			global_data->lame_pid = 0;
+			global_data->numLameFailed++;
 		}
 	} else {
-		if (pid == cdparanoia_pid) {
-			cdparanoia_pid = 0;
+		if (pid == global_data->cdparanoia_pid) {
+			global_data->cdparanoia_pid = 0;
 			if (global_prefs->rip_wav)
-				numCdparanoiaOk++;
-		} else if (pid == lame_pid) {
-			lame_pid = 0;
-			numLameOk++;
+				global_data->numCdparanoiaOk++;
+		} else if (pid == global_data->lame_pid) {
+			global_data->lame_pid = 0;
+			global_data->numLameOk++;
 		}
 	}
 }

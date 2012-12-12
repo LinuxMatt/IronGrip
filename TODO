@@ -3,5 +3,7 @@ TODO
 
 * make install
 * 'eject disc' doesn't work.
+* Enable logging on console (stderr)
+* Fix log output format
 
 

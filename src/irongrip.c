@@ -2054,7 +2054,8 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, label, "bitrate_lbl");
 
 	char kbps_text[10];
-	snprintf(kbps_text, 10, _("%dKbps"), 32);
+	int bitrate = mp3_quality_to_bitrate(global_prefs->mp3_quality,global_prefs->mp3_vbr);
+	snprintf(kbps_text, 10, _("%dKbps"), bitrate);
 	label = gtk_label_new(kbps_text);
 	gtk_widget_show(label);
 	gtk_box_pack_start(GTK_BOX(hbox9), label, FALSE, FALSE, 0);
@@ -2982,7 +2983,7 @@ static void dorip()
 	g_free(albumdir);
 	g_free(playlist);
 
-	set_status("global_data->Working...");
+	set_status("Working...");
 	disable_all_main_widgets();
 	gtk_widget_show(LKP_MAIN("win_ripping"));
 	gtk_widget_hide(LKP_MAIN("scroll"));
@@ -3016,14 +3017,15 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 	args[pos++] = "-b";
 	int bitrate = mp3_quality_to_bitrate(global_prefs->mp3_quality,global_prefs->mp3_vbr);
 
-	char txt[3];
-	snprintf(txt, 3, "%d", bitrate);
-	args[pos++] = "-b";
+	char br_txt[8];
+	snprintf(br_txt, 8, "%d", bitrate);
+	args[pos++] = br_txt;
 
-	snprintf(txt, 3, "%d", tracknum);
+	char tr_txt[3];
+	snprintf(tr_txt, 3, "%d", tracknum);
 	if ((tracknum > 0) && (tracknum < 100)) {
 		args[pos++] = "--tn";
-		args[pos++] = txt;
+		args[pos++] = tr_txt;
 	}
 	if ((artist != NULL) && (strlen(artist) > 0)) {
 		args[pos++] = "--ta";

@@ -75,6 +75,7 @@
 #endif
 
 #include "irongrip.icon.h"
+#include "license.gpl.h"
 
 #define AUTHOR "Matt Thirtytwo <matt59491@gmail.com>"
 #define HOMEPAGE "https://github.com/LinuxMatt/IronGrip"
@@ -1515,9 +1516,16 @@ static void show_aboutbox(void)
 {
 	GdkPixbuf* icon = NULL;
 
+	gchar license[COPYING_len+1];
+	memcpy(license,COPYING,COPYING_len);
+	license[COPYING_len]= 0;
+
+
+	/*
 	gchar *license = PROGRAM_NAME
 					" is distributed under the GNU General Public Licence\n"
 					"version 2, please see COPYING file for the complete text.\n";
+					*/
 
 	gchar* authors[] = { AUTHOR,
 						"",

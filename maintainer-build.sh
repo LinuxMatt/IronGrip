@@ -15,6 +15,7 @@ rm Makefile.in aclocal.m4 config.h.in configure  depcomp  install-sh  missing sr
 rm -r autom4te.cache 2> /dev/null
 rm po/Makefile.in.in 2> /dev/null
 rm src/irongrip.icon.h 2> /dev/null
+rm src/license.gpl.h 2> /dev/null
 
 if [ "x${ACTION}" != "xbuild" ];
 then
@@ -24,6 +25,8 @@ fi
 
 echo "* Creating icon include file..."
 xxd -i pixmaps/${PROGRAM}.png > src/${PROGRAM}.icon.h
+echo "* Creating COPYING include file..."
+xxd -i COPYING > src/license.gpl.h
 echo "* Running aclocal ..."
 aclocal || exit 2
 echo "* Running autoheader ..."

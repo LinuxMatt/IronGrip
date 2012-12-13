@@ -8,6 +8,7 @@ AM_MAINTAINER_MODE
 IT_PROG_INTLTOOL([0.34.90])
 
 AC_ISC_POSIX
+AC_PROG_RANLIB
 AC_PROG_CC
 AM_PROG_CC_STDC
 AC_HEADER_STDC
@@ -19,7 +20,8 @@ AC_FUNC_FORK
 AC_FUNC_MALLOC
 AC_CHECK_FUNCS([bzero dup2 memset mkdir strdup strerror strrchr strtol])
 
-pkg_modules="gtk+-2.0 >= 2.6.0, gthread-2.0 >= 2.4.0, libcddb >= 0.9.5"
+# pkg_modules="gtk+-2.0 >= 2.6.0, gthread-2.0 >= 2.4.0, libcddb >= 0.9.5"
+pkg_modules="gtk+-2.0 >= 2.6.0, gthread-2.0 >= 2.4.0"
 PKG_CHECK_MODULES(PACKAGE, [$pkg_modules])
 AC_SUBST(PACKAGE_CFLAGS)
 AC_SUBST(PACKAGE_LIBS)
@@ -40,6 +42,7 @@ AC_DEFINE([PROGRAM_NAME], ["IronGrip"], ["Program name"])
 
 AC_OUTPUT([
 Makefile
+libcddb/Makefile
 src/Makefile
 po/Makefile.in
 ])

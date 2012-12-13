@@ -11,7 +11,10 @@ fi
 ACTION=$1
 
 make maintainer-clean
-rm Makefile.in aclocal.m4 config.h.in configure  depcomp  install-sh  missing src/Makefile.in 2> /dev/null
+make clean
+rm aclocal.m4 config.h.in configure  depcomp  install-sh  missing 2> /dev/null
+rm Makefile.in src/Makefile.in libcddb/Makefile.in 2> /dev/null
+rm Makefile config.h config.log config.status stamp-h1 2>/dev/null
 rm -r autom4te.cache 2> /dev/null
 rm po/Makefile.in.in 2> /dev/null
 rm src/irongrip.icon.h 2> /dev/null

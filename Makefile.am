@@ -1,6 +1,6 @@
 ## Process this file with automake to produce Makefile.in
 
-SUBDIRS = src po
+SUBDIRS = libcddb src po
 pixdir = $(datadir)/$(PIXMAPDIR)
 pix_DATA = $(PIXMAPDIR)/$(PACKAGE).png
 EXTRA_DIST = $(PACKAGE).desktop $(PIXMAPDIR)/$(PACKAGE).png

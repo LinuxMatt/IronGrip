@@ -2,7 +2,7 @@ IronGrip
 ========
 Graphical frontend for Audio CD ripping and encoding
 
-**In alpha stage, this project still needs lots of testing and bug fixes**.
+**In beta stage, this project still needs testing, please report bugs**.
 
 Homepage
 --------

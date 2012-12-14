@@ -97,7 +97,6 @@
 
 #define PIXMAP_PATH  PACKAGE_DATA_DIR "/" PIXMAPDIR
 #define DEFAULT_LOG_FILE "/tmp/irongrip.log"
-#define EXEC_OUTPUT_LOG "/tmp/irongrip.execoutput"
 
 #define LAME_PRG "lame"
 #define CDPARANOIA_PRG "cdparanoia"
@@ -188,6 +187,7 @@ typedef struct _shared {
 	bool allDone; /* for stopping the tracking thread */
 	bool overwriteAll;
 	bool overwriteNone;
+	bool trace;
 	bool working; /* ripping or encoding, so that can know not to clear the tracklist on eject */
 	cddb_conn_t * cddb_query_thread_conn;
 	cddb_disc_t * cddb_query_thread_disc;
@@ -241,13 +241,13 @@ static void sigchld();
 
 
 /** Write current time in the log file. */
-static void log_time()
+static void log_time(FILE *fd)
 {
 	struct tm *d;
 	struct timeb s_timeb;
 	ftime(&s_timeb);
 	d = localtime(&s_timeb.time);
-	fprintf(global_data->log_fd, "\n#%02d/%02d/%04d %02d:%02d:%02d.%03u|", d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year, d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
+	fprintf(fd, "\n#%02d/%02d/%04d %02d:%02d:%02d.%03u|", d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year, d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
 }
 
 /*! Get current time as a formatted date string: DD/MM/YYYY hh:mm:ss
@@ -263,6 +263,7 @@ static char* get_time_str(char time_str[32])
 	snprintf(time_str, 32, "%02d/%02d/%04d %02d:%02d:%02d.%03u", d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year, d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
 	return time_str;
 }
+
 static bool log_init()
 {
 	struct stat sts;
@@ -283,8 +284,11 @@ static bool log_init()
 		}
 	}
 	if( (global_data->log_fd=fopen(global_prefs->log_file,fmode)) == NULL) {
+		fprintf(stderr,"Warning: cannot open log file '%s' in write mode\n", global_prefs->log_file);
+		perror("fopen");
 		return FALSE;
 	}
+	global_data->trace = TRUE;
 	get_time_str(time_str);
 	fprintf(global_data->log_fd, "\n\n ----- %s START -----", time_str);
 	fflush(global_data->log_fd);
@@ -293,18 +297,15 @@ static bool log_init()
 
 static void log_end()
 {
+	if(global_data->log_fd == NULL) return;
+	if(!global_data->trace) return;
+
 	char time_str[32];
-
-	if(global_data->log_fd == NULL)
-		return;
-
-	if(!global_prefs->do_log)
-		return;
-
 	get_time_str(time_str);
 	fprintf(global_data->log_fd, "\n ----- %s STOP -----\n", time_str);
 	fflush(global_data->log_fd);
 	fclose(global_data->log_fd);
+	global_data->log_fd = NULL;
 }
 
 /** convert log level to string. */
@@ -324,19 +325,23 @@ static char* strloglevel(int log_level)
 static void log_gen(const char *func_name, int log_level, const char *fmt, ...)
 {
 	static int n=0; // be persistent
-	if(global_data->log_fd==NULL)
-		global_data->log_fd = stderr;
+	FILE *fd = NULL;
 
-	if(global_prefs->do_log == 0 && log_level != LOG_FATAL)
+	if(global_data->trace == 0 && log_level != LOG_FATAL)
 		return;
 
+	if(global_data->log_fd==NULL)
+		fd = stderr;
+	else
+		fd = global_data->log_fd;
+
 	va_list args;
-	log_time();
-	fprintf(global_data->log_fd,"0x%04lX|%04d|%s|%s|", pthread_self(), ++n, strloglevel(log_level), func_name);
+	log_time(fd);
+	fprintf(fd,"0x%04lX|%04d|%s|%s|", pthread_self(), ++n, strloglevel(log_level), func_name);
 	va_start(args,fmt);
-	vfprintf(global_data->log_fd, fmt, args);
+	vfprintf(fd, fmt, args);
 	va_end(args);
-	fflush(global_data->log_fd);
+	fflush(fd);
 }
 
 static int get_field(char *buf, char *filename, char *field, char **value)
@@ -455,6 +460,15 @@ static int is_file(char *path) {
    }
    return S_ISREG(st.st_mode);
 }
+
+static int is_directory(char *path) {
+   struct stat st;
+   if (stat(path, &st) == -1) {
+      return 0;
+   }
+   return S_ISDIR(st.st_mode);
+}
+
 
 static void fatalError(const char *message)
 {
@@ -1392,6 +1406,10 @@ static void on_window_close(GtkWidget * widget, GdkEventFocus * event, gpointer 
 static void read_completion_file(GtkListStore * list, const char *name)
 {
 	gchar *file = get_config_path(name);
+	if(!file) {
+		log_gen(__func__, LOG_WARN, "Warning: could not get completion file path: %s", strerror(errno));
+		return;
+	}
 	log_gen(__func__, LOG_INFO, "Reading completion data for %s in %s", name, file);
 	FILE *data = fopen(file, "r");
 	if (data == NULL) {
@@ -1460,6 +1478,10 @@ static void save_completion(GtkWidget * entry)
 	if (name == NULL) return;
 
 	gchar *file = get_config_path(name);
+	if(!file) {
+		log_gen(__func__, LOG_WARN, "Warning: could not get completion file path: %s", strerror(errno));
+		return;
+	}
 	log_gen(__func__, LOG_INFO, "Saving completion data for %s in %s", name, file);
 	FILE *fd = fopen(file, "w");
 	if (fd) {
@@ -1650,7 +1672,6 @@ static GtkWidget *create_main(void)
 	GtkWidget *pick_disc = gtk_combo_box_new();
 	gtk_table_attach(GTK_TABLE(table2), pick_disc, 1, 2, 0, 1, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (GTK_FILL), 0, 0);
 
-
 	GtkWidget *album_genre = gtk_entry_new();
 	create_completion(album_genre, WDG_ALBUM_GENRE);
 	gtk_widget_show(album_genre);
@@ -1702,24 +1723,28 @@ static GtkWidget *create_main(void)
 
 	GtkWidget *rip_box = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(rip_box);
-	gtk_container_set_border_width(GTK_CONTAINER(rip_box), 10);
+	gtk_container_set_border_width(GTK_CONTAINER(rip_box), 0);
 	GtkWidget *table = gtk_table_new(3, 2, FALSE);
 	gtk_widget_show(table);
-	gtk_box_pack_start(GTK_BOX(rip_box), table, TRUE, TRUE, 10);
-	GtkWidget *progress_total = ripping_bar( table,"Total progress", 0);
-	GtkWidget *progress_rip = ripping_bar( table,"Ripping", 1);
-	GtkWidget *progress_encode = ripping_bar( table,"Encoding", 2);
+	gtk_box_pack_start(GTK_BOX(rip_box), table, FALSE, FALSE, 0);
+	GtkWidget *progress_total = ripping_bar(table,"Total progress", 0);
+	GtkWidget *progress_rip = ripping_bar(table,"Ripping", 1);
+	GtkWidget *progress_encode = ripping_bar(table,"Encoding", 2);
+
 	GtkWidget *cancel = gtk_button_new_from_stock("gtk-cancel");
 	gtk_widget_show(cancel);
 	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
-	gtk_box_pack_start(GTK_BOX(rip_box), cancel, FALSE, FALSE, 24);
+	GtkWidget *alignment_cancel= gtk_alignment_new(0.5, 0.5, 0.4, 1);
+	gtk_widget_show(alignment_cancel);
+	gtk_container_add(GTK_CONTAINER(alignment_cancel), cancel);
+	gtk_box_pack_start(GTK_BOX(rip_box), alignment_cancel, FALSE, FALSE, 8);
 	g_signal_connect((gpointer) cancel, "clicked", G_CALLBACK(on_cancel_clicked), NULL);
 
 	GtkWidget *win_ripping = gtk_frame_new(NULL);
-	gtk_container_set_border_width(GTK_CONTAINER(win_ripping), 20);
+	gtk_container_set_border_width(GTK_CONTAINER(win_ripping), 8);
 	gtk_frame_set_label(GTK_FRAME(win_ripping), "Progress");
 	gtk_container_add(GTK_CONTAINER(win_ripping), rip_box);
-	gtk_box_pack_start(GTK_BOX(vbox1), win_ripping, TRUE, FALSE, 10);
+	gtk_box_pack_start(GTK_BOX(vbox1), win_ripping, TRUE, TRUE, 0);
 
 	// TRackList
 	// set up all the columns for the track listing widget
@@ -1767,13 +1792,9 @@ static GtkWidget *create_main(void)
 
 	GtkWidget *statusLbl = gtk_label_new("Welcome to " PROGRAM_NAME);
 	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
-	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0, 0.5);
+	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
 	gtk_box_pack_start(GTK_BOX(hbox5), statusLbl, TRUE, TRUE, 0);
 	gtk_widget_show(statusLbl);
-
-	GtkWidget *fillerBox = gtk_hbox_new(FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hbox5), fillerBox, TRUE, TRUE, 0);
-	gtk_widget_show(hbox5);
 
 	g_signal_connect((gpointer) main_win, "delete_event", G_CALLBACK(on_window_close), NULL);
 	g_signal_connect((gpointer) tracklist, "button-press-event", G_CALLBACK(on_tracklist_mouse_click), NULL);
@@ -2354,8 +2375,8 @@ static prefs *get_default_prefs()
 	p->max_log_size = 5000; // kb
 	p->log_file = g_strdup(DEFAULT_LOG_FILE);
 	p->eject_on_done = 0;
-	p->main_window_height = 450;
-	p->main_window_width = 600;
+	p->main_window_height = 380;
+	p->main_window_width = 520;
 	p->make_playlist = 1;
 	p->mp3_quality = 2; // 0:low, 1:good, 2:high, 3:max
 	p->mp3_vbr = 1;
@@ -2364,7 +2385,7 @@ static prefs *get_default_prefs()
 	p->use_proxy = 0;
 	p->port_number = DEFAULT_PROXY_PORT;
 	p->cddb_port_number = DEFAULT_CDDB_SERVER_PORT;
-	p->music_dir = g_strdup_printf("%s/%s", getenv("HOME"), "irongripped");
+	p->music_dir = g_strdup(getenv("HOME"));
 	p->cdrom = g_strdup("/dev/cdrom");
 	p->format_music = g_strdup("%N - %A - %T");
 	p->format_playlist = g_strdup("%A - %L");
@@ -2458,20 +2479,44 @@ static void get_prefs_from_widgets(prefs * p)
 	p->cddb_port_number = atoi(GET_PREF_TEXT("cddb_port_number"));
 }
 
+static bool create_directory(gchar *path)
+{
+	if(!is_directory(path)) {
+		mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
+		int rc = mkdir(path, mode);
+		if (rc != 0 && errno != EEXIST) {
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
 static gchar* get_config_path(const gchar *file_suffix)
 {
 	// TODO get a config file path, using XDG_CONFIG_HOME if available
 	// TODO fix allocation scheme
-	// TODO create .config dir if necessary
-	// TODO check that parent directories exist
 
 	const gchar *home = g_getenv("HOME");
+	gchar *path = NULL;
+
+	path = g_strdup_printf("%s/.config", home);
+	if(!create_directory(path)) {
+		g_free(path);
+		return NULL;
+	}
+	g_free(path);
+	path = g_strdup_printf("%s/.config/%s", home, PACKAGE);
+	if(!create_directory(path)) {
+		g_free(path);
+		return NULL;
+	}
 	gchar *filename = NULL;
 	if(file_suffix == NULL) {
-		filename = g_strdup_printf("%s/.config/%s.conf", home, PACKAGE);
+		filename = g_strdup_printf("%s/%s.conf", path, PACKAGE);
 	} else {
-		filename = g_strdup_printf("%s/.config/%s.%s", home, PACKAGE, file_suffix);
+		filename = g_strdup_printf("%s/%s.%s", path, PACKAGE, file_suffix);
 	}
+	g_free(path);
 	return filename;
 }
 
@@ -2479,10 +2524,15 @@ static gchar* get_config_path(const gchar *file_suffix)
 static void save_prefs(prefs * p)
 {
 	gchar *file = get_config_path(NULL);
+	if(!file) {
+		log_gen(__func__, LOG_FATAL, "Error: could not save configuration: %s", strerror(errno));
+		return;
+	}
 
 	FILE *fd = fopen(file, "w");
 	if (fd == NULL) {
 		log_gen(__func__, LOG_WARN, "Warning: could not save fd file: %s", strerror(errno));
+		g_free(file);
 		return;
 	}
 	log_gen(__func__, LOG_INFO, "Saving configuration");
@@ -2509,18 +2559,25 @@ static void save_prefs(prefs * p)
 	fprintf(fd, "CDDB_SERVER_NAME=%s\n", p->cddb_server_name);
 	fprintf(fd, "CDDB_PORT=%d\n", p->cddb_port_number);
 	fclose(fd);
+	g_free(file);
 }
 
 // load the prefereces from the config file into the given prefs struct
 static void load_prefs(prefs * p)
 {
 	gchar *file = get_config_path(NULL);
+	if(!file) {
+		log_gen(__func__, LOG_WARN, "Warning: could not get configuration file path: %s", strerror(errno));
+		return;
+	}
 	char *buf = NULL;
 	char *s = NULL; // start position into buffer
 	if(!is_file(file)) {
+		g_free(file);
 		return;
 	}
 	if(!load_file(file, &buf)) {
+		g_free(file);
 		return;
 	}
 	s = buf; // Start of HEADER section
@@ -2566,6 +2623,7 @@ static void load_prefs(prefs * p)
 	if(buf) {
 		g_free(buf);
 	}
+	g_free(file);
 }
 
 // use this method when reading the "music_dir" field of a prefs struct
@@ -2710,6 +2768,7 @@ static void abort_threads()
     gtk_widget_hide(LKP_MAIN("win_ripping"));
 	gtk_widget_show(LKP_MAIN("scroll"));
 	enable_all_main_widgets();
+	set_status("Job cancelled.");
 }
 
 static void on_cancel_clicked(GtkButton * button, gpointer user_data)
@@ -2806,7 +2865,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 				global_data->rip_percent = (double)(sector - start) / (end - start);
 			}
 		} else {
-			printf("Unknown data : %s\n", buf);
+			// printf("Unknown data : %s\n", buf);
 		}
 	} while (size > 0);
 
@@ -2867,7 +2926,9 @@ static gpointer rip_thread(gpointer data)
 				if (!confirmOverwrite(wavfilename)) doRip = false;
 				gdk_threads_leave();
 			}
-			if (doRip) cdparanoia(global_prefs->cdrom, tracknum, wavfilename);
+			if (doRip) {
+				cdparanoia(global_prefs->cdrom, tracknum, wavfilename);
+			}
 
 			g_free(albumdir);
 			g_free(musicfilename);
@@ -2889,7 +2950,6 @@ static gpointer rip_thread(gpointer data)
 		set_status("Trying to eject disc...");
 		eject_disc(global_prefs->cdrom);
 	}
-	set_status("Finished");
 	return NULL;
 }
 
@@ -3323,6 +3383,7 @@ static gpointer track_thread(gpointer data)
 		Sleep(200);
 	}
 	gdk_threads_enter();
+	set_status("Ready.");
 	gtk_window_set_title(GTK_WINDOW(win_main), "Iron Grip");
 	gdk_threads_leave();
 	log_gen(__func__, LOG_TRACE, "The End.");
@@ -3404,13 +3465,15 @@ static int exec_with_output(const char *args[], int toread, pid_t * p)
 
 	// i'm the parent
 	log_gen(__func__, LOG_INFO, "%d started: %s ", *p, args[0]);
+	/*
 	int count;
-	printf("ARGS:");
+	printf("\nARGS:\n");
 	for (count = 1; args[count] != NULL; count++) {
 		printf("%s|",args[count]);
 		//log_gen(__func__, LOG_INFO, "%s ", args[count]);
 	}
 	printf("\n");
+	*/
 	// close the side of the pipe we don't need
 	close(pipefd[1]);
 	return pipefd[0];

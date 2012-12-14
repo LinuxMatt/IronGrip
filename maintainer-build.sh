@@ -12,13 +12,31 @@ ACTION=$1
 
 make maintainer-clean
 make clean
-rm aclocal.m4 config.h.in configure  depcomp  install-sh  missing 2> /dev/null
-rm Makefile.in src/Makefile.in libcddb/Makefile.in 2> /dev/null
-rm Makefile config.h config.log config.status stamp-h1 2>/dev/null
+# EXTRA CLEANUP
 rm -r autom4te.cache 2> /dev/null
+rm Makefile 2> /dev/null
+rm Makefile.in 2> /dev/null
+rm aclocal.m4 2> /dev/null
+rm config.h 2> /dev/null
+rm config.h.in 2> /dev/null
+rm config.log 2> /dev/null
+rm config.status 2> /dev/null
+rm configure 2> /dev/null
+rm depcomp 2> /dev/null
+rm install-sh 2> /dev/null
+rm intltool-extract 2> /dev/null
+rm intltool-extract.in 2> /dev/null
+rm intltool-merge 2> /dev/null
+rm intltool-merge.in 2> /dev/null
+rm intltool-update 2> /dev/null
+rm intltool-update.in 2> /dev/null
+rm libcddb/Makefile.in 2> /dev/null
+rm missing 2> /dev/null
 rm po/Makefile.in.in 2> /dev/null
+rm src/Makefile.in 2> /dev/null
 rm src/irongrip.icon.h 2> /dev/null
 rm src/license.gpl.h 2> /dev/null
+rm stamp-h1 2>/dev/null
 
 if [ "x${ACTION}" != "xbuild" ];
 then

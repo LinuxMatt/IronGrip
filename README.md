@@ -13,24 +13,9 @@ Features
 - Supports WAV and MP3 encoding
 - Uses CDDB
 
-History
--------
-IronGrip is a stripped-down (and experimental) fork of the Asunder project.
-The Asunder program is a graphical Audio CD ripper and encoder for Linux.
-Asunder's project homepage : http://littlesvr.ca/asunder .
-I would like to thank the authors and contributors of the Asunder project for sharing their work under GPL.
-If you're looking for a stable audio CD ripper and encoder with lots of encoding formats, then you should use Asunder instead of IronGrip.
-Asunder's packages are available for several linux distributions.
-
-Authors
--------
-- Matt Thirtytwo <matt59491@gmail.com>
-- Andrew Smith (Asunder)
-- Eric Lathrop (Asunder)
-- And the contributors of the Asunder project.
-
 Requirements
 ------------
+- Linux
 - GTK+ 2.6 or greater
 - Libcddb 1.3.2 source code is included.
   http://libcddb.sourceforge.net/
@@ -38,6 +23,20 @@ Requirements
   http://www.xiph.org/paranoia/
 - LAME (for MP3 support).
   http://lame.sourceforge.net/
+
+Supported systems
+-----------------
+The following distributions are expected to work with IronGrip:
+- Ubuntu 8.04 LTS and above (32bit and 64bit)
+- Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
+- All Linux distributions with at least GTK+ v2.6 (not tested)
+
+Test systems
+------------
+The following distributions are used for developing IronGrip:
+- Ubuntu 8.04.4 LTS (32 bit)
+- Ubuntu 12.04 LTS (32 bit) on ASUS eeePC 900
+- Linux Mint 13 LTS (64 bit)
 
 Installing requirements in Ubuntu
 ---------------------------------
@@ -48,8 +47,8 @@ To install Cdparanoia and Lame from a terminal, type the following commands:
 Build dependencies
 ------------------
 First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...).
-To compile the source, you may also need the -dev or -devel versions of GTK+ and libcddb.
-On Ubuntu, these packages are called libgtk2.0-dev and libcddb2-dev.
+To compile the source, you may also need the -dev or -devel version of GTK+.
+On Ubuntu, this package is called libgtk2.0-dev.
 - sudo apt-get install automake
 - sudo apt-get install intltool
 - sudo apt-get install libgtk2.0-dev
@@ -65,6 +64,22 @@ You can run the compiled program from the 'src' directory.
 
 You should not use 'make install' for the moment, because it has not been thoroughly tested yet.
 Coming soon ;)
+
+History
+-------
+IronGrip is a stripped-down (and experimental) fork of the Asunder project.
+The Asunder program is a graphical Audio CD ripper and encoder for Linux.
+Asunder's project homepage : http://littlesvr.ca/asunder .
+I would like to thank the authors and contributors of the Asunder project for sharing their work under GPL.
+If you're looking for a stable audio CD ripper and encoder with lots of encoding formats, then you should use Asunder instead of IronGrip.
+Asunder's packages are available for several linux distributions.
+
+Authors
+-------
+- Matt Thirtytwo <matt59491@gmail.com>
+- Andrew Smith (Asunder)
+- Eric Lathrop (Asunder)
+- And the contributors of the Asunder project.
 
 Thanks
 ------

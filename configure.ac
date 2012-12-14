@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 
-AC_PREREQ([2.67])
+AC_PREREQ([2.61])
 AC_INIT(configure.ac)
 AM_INIT_AUTOMAKE(irongrip, 0.1)
 AM_CONFIG_HEADER(config.h)
@@ -20,7 +20,6 @@ AC_FUNC_FORK
 AC_FUNC_MALLOC
 AC_CHECK_FUNCS([bzero dup2 memset mkdir strdup strerror strrchr strtol])
 
-# pkg_modules="gtk+-2.0 >= 2.6.0, gthread-2.0 >= 2.4.0, libcddb >= 0.9.5"
 pkg_modules="gtk+-2.0 >= 2.6.0, gthread-2.0 >= 2.4.0"
 PKG_CHECK_MODULES(PACKAGE, [$pkg_modules])
 AC_SUBST(PACKAGE_CFLAGS)

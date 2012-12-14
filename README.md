@@ -32,11 +32,11 @@ Authors
 Requirements
 ------------
 - GTK+ 2.6 or greater
-- Libcddb 0.9.5 or greater
+- Libcddb 1.3.2 source code is included.
   http://libcddb.sourceforge.net/
-- Cdparanoia (for Audio CD ripping)
+- Cdparanoia (for Audio CD ripping).
   http://www.xiph.org/paranoia/
-- LAME (for MP3 support)
+- LAME (for MP3 support).
   http://lame.sourceforge.net/
 
 Installing requirements in Ubuntu
@@ -53,7 +53,6 @@ On Ubuntu, these packages are called libgtk2.0-dev and libcddb2-dev.
 - sudo apt-get install automake
 - sudo apt-get install intltool
 - sudo apt-get install libgtk2.0-dev
-- sudo apt-get install libcddb2-dev
 
 Compiling
 ---------
@@ -67,8 +66,16 @@ You can run the compiled program from the 'src' directory.
 You should not use 'make install' for the moment, because it has not been thoroughly tested yet.
 Coming soon ;)
 
+Thanks
+------
+- Authors and contributors of the Asunder project. http://littlesvr.ca/asunder
+- Authors and contributors of the Libcddb project. http://libcddb.sourceforge.net/
+
 License
 -------
 The source code of this project is distributed under the GNU General Public Licence version 2.
 See file 'COPYING'
+
+The source code of libcddb is distributed under the GNU Library General Public Licence version 2.
+See file 'libcddb/COPYING'
 

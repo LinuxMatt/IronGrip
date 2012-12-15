@@ -6,4 +6,11 @@ TODO
 * Enable logging on console (stderr)
 * Fix log output format
 
+* Fix GTK+ requirement in doc and configure.ac
+  - IronGrip does not compile on Slackware 10.2 because GTK+ is too old (2.6.10).
+  - irongrip seems to require at least GTK+ v2.8
+  - gtk_entry_completion_set_popup_set_width () requires GTK+ 2.8
+
+  
+
 

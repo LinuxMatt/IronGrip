@@ -29,7 +29,7 @@ Supported systems
 The following distributions are expected to work with IronGrip:
 - Ubuntu 8.04 LTS and above (32bit and 64bit)
 - Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
-- All Linux distributions with at least GTK+ v2.6 (not tested)
+- All Linux distributions with at least GTK+ v2.8 (not tested)
 
 Test systems
 ------------

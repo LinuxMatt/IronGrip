@@ -16,7 +16,7 @@ Features
 Requirements
 ------------
 - Linux
-- GTK+ 2.6 or greater
+- GTK+ 2.8 or greater
 - Libcddb 1.3.2 source code is included.
   http://libcddb.sourceforge.net/
 - Cdparanoia (for Audio CD ripping).

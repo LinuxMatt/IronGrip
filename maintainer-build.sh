@@ -37,6 +37,9 @@ rm src/Makefile.in 2> /dev/null
 rm src/irongrip.icon.h 2> /dev/null
 rm src/license.gpl.h 2> /dev/null
 rm stamp-h1 2>/dev/null
+rm config.guess 2>/dev/null
+rm config.sub 2>/dev/null
+rm ltmain.sh 2>/dev/null
 
 if [ "x${ACTION}" != "xbuild" ];
 then
@@ -62,5 +65,4 @@ echo "* Running configure with prefix=$INSTALL_PREFIX ..."
 ./configure --prefix=${INSTALL_PREFIX} || exit 2
 echo "* Running make ..."
 make
-
 

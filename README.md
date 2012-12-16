@@ -17,6 +17,7 @@ Requirements
 ------------
 - Linux
 - GTK+ 2.8 or greater
+- Glib 2.10 or greater
 - Libcddb 1.3.2 source code is included.
   http://libcddb.sourceforge.net/
 - Cdparanoia (for Audio CD ripping).
@@ -29,7 +30,8 @@ Supported systems
 The following distributions are expected to work with IronGrip:
 - Ubuntu 8.04 LTS and above (32bit and 64bit)
 - Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
-- All Linux distributions with at least GTK+ v2.8 (not tested)
+- All Linux distributions with the above requirements (not tested)
+- Compilation under Ubuntu 6.06 LTS is possible with some manual tweaking.
 
 Test systems
 ------------

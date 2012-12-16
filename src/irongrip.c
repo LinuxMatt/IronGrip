@@ -1581,7 +1581,7 @@ static void show_aboutbox(void)
 			// "documenters", documenters,
 			"logo", icon,
 			"name", name,
-			"program-name", name,
+			// "program-name", name, // not in GTK 2.8, since 2.12
 			"version", version,
 			"website", website,
 			"website-label", website_label,
@@ -3503,8 +3503,11 @@ int main(int argc, char *argv[])
 	if(!lookup_cdparanoia()) {
 		// exit(-1);
 	}
+
 	// set up recurring timeout to automatically re-scan the cdrom once in a while
-	g_timeout_add_seconds(10, idle, (void *)1);
+	// g_timeout_add_seconds(10, idle, (void *)1);
+	// The above function requires glib >= 2.14.
+	g_timeout_add(10000, idle, (void *)1);
 
 	// add an idle event to scan the cdrom drive ASAP
 	g_idle_add(scan_on_startup, NULL);

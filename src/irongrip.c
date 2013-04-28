@@ -34,6 +34,7 @@
 #endif
 #include <cddb/cddb.h>
 #include <ctype.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <gdk/gdkkeysyms.h>
@@ -94,34 +95,71 @@
 #define UTF8 "UTF-8"
 #define STR_UNKNOWN "unknown"
 #define STR_TEXT "text"
-
 #define PIXMAP_PATH  PACKAGE_DATA_DIR "/" PIXMAPDIR
 #define DEFAULT_LOG_FILE "/tmp/irongrip.log"
-
 #define LAME_PRG "lame"
 #define CDPARANOIA_PRG "cdparanoia"
 
+#define pWdg GtkWidget*
 #define WDG_ALBUM_ARTIST "album_artist"
 #define WDG_ALBUM_TITLE "album_title"
 #define WDG_ALBUM_GENRE "album_genre"
 #define WDG_ALBUM_YEAR "album_year"
 #define WDG_TRACKLIST "tracklist"
 #define WDG_PICK_DISC "pick_disc"
+#define WDG_CDROM_DRIVES "cdrom_drives"
+#define WDG_MP3_QUALITY "combo_mp3_quality"
+#define WDG_RIPPING "win_ripping"
+#define WDG_SCROLL "scroll"
+#define WDG_ABOUT "about"
+#define WDG_DISC "disc"
+#define WDG_CDDB "lookup"
+#define WDG_MAIN "main"
+#define WDG_PREFS "preferences"
+#define WDG_RIP "rip_button"
+#define WDG_SINGLE_ARTIST "single_artist"
+#define WDG_SINGLE_GENRE "single_genre"
+#define WDG_STATUS "statusLbl"
+#define WDG_PROGRESS_TOTAL "progress_total"
+#define WDG_PROGRESS_RIP "progress_rip"
+#define WDG_PROGRESS_ENCODE "progress_encode"
+#define WDG_MP3VBR "mp3_vbr"
+#define WDG_BITRATE "bitrate_lbl_2"
+#define WDG_FMT_MUSIC "format_music"
+#define WDG_FMT_PLAYLIST "format_playlist"
+#define WDG_FMT_ALBUMDIR "format_albumdir"
+#define WDG_LBL_ARTIST "artist_label"
+#define WDG_LBL_ALBUMTITLE "albumtitle_label"
+#define WDG_LBL_GENRE "genre_label"
 
+#define STR_FREE(x) g_free(x);x=NULL
 #define Sleep(x) usleep(x*1000)
-#define HOOKUP(component,widget,name) g_object_set_data_full (G_OBJECT (component), name,  gtk_widget_ref (widget), (GDestroyNotify) gtk_widget_unref)
-#define HOOKUP_OBJ_NOREF(component,widget,name) g_object_set_data (G_OBJECT (component), name, widget)
 
+#define DIALOG_INFO_OK(...) \
+	show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_OK,  __VA_ARGS__)
+#define DIALOG_WARNING_OK(...) \
+	show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,  __VA_ARGS__)
+#define DIALOG_ERROR_OK(...) \
+	show_dialog(GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,  __VA_ARGS__)
+#define DIALOG_INFO_CLOSE(...) \
+	show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
+#define DIALOG_WARNING_CLOSE(...) \
+	show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
+
+#define HOOKUP(obj,wdg,name) g_object_set_data_full(G_OBJECT(obj), name,\
+						gtk_widget_ref(wdg), (GDestroyNotify) gtk_widget_unref)
+#define HOOKUP_NOREF(obj,wdg,name) g_object_set_data(G_OBJECT(obj), name, wdg)
 #define LKP_MAIN(x) lookup_widget(win_main, x)
 #define LKP_PREF(x) lookup_widget(win_prefs, x)
-#define DIALOG_INFO_OK(...) show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_OK,  __VA_ARGS__)
-#define DIALOG_WARNING_OK(...) show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,  __VA_ARGS__)
-#define DIALOG_ERROR_OK(...) show_dialog(GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,  __VA_ARGS__)
-#define DIALOG_INFO_CLOSE(...) show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
-#define DIALOG_WARNING_CLOSE(...) show_dialog(GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE,  __VA_ARGS__)
 #define GET_PREF_TEXT(x) gtk_entry_get_text(GTK_ENTRY(LKP_PREF(x)))
 #define GET_MAIN_TEXT(x) gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(x)))
 #define CLEAR_TEXT(x) gtk_entry_set_text(GTK_ENTRY(LKP_MAIN(x)), "")
+#define SET_MAIN_TEXT(x,y) gtk_entry_set_text(GTK_ENTRY(LKP_MAIN(x)), y)
+#define LKP_TRACKLIST GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))
+#define GTK_EXPAND_FILL (GTK_EXPAND|GTK_FILL)
+#define COMBO_MP3Q GTK_COMBO_BOX(LKP_PREF(WDG_MP3_QUALITY))
+#define COMBO_DRIVE GTK_COMBO_BOX(LKP_PREF(WDG_CDROM_DRIVES))
+#define WIDGET_SHOW(x) gtk_widget_show(LKP_MAIN(x))
 
 #define LOG_NONE	0	//!< Absolutely quiet. DO NOT USE.
 #define LOG_FATAL	1	//!< Only errors are reported.
@@ -130,11 +168,25 @@
 #define LOG_TRACE	4	//!< Trace messages. Debug only.
 #define LOG_DEBUG	5	//!< Verbose debugging.
 
+#define TRACEWARN(...) log_gen(__func__, LOG_WARN, __VA_ARGS__)
+#define TRACERROR(...) log_gen(__func__, LOG_FATAL, __VA_ARGS__)
+#define TRACEINFO(...) log_gen(__func__, LOG_INFO, __VA_ARGS__)
+
 #define SANITIZE(x) trim_chars(x, BADCHARS); trim_whitespace(x)
-#define TOGGLE_ACTIVE(x,y) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lookup_widget(win_main, x)), y)
-#define WIDGET_SHOW(x) gtk_widget_show(lookup_widget(win_main, x))
 
+#define TOGGLE_ACTIVE(x,y) \
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(LKP_MAIN(x)), y)
 
+#define CONNECT_SIGNAL(wdg,signal,cb) \
+	g_signal_connect((gpointer) wdg, signal, G_CALLBACK(cb), NULL)
+
+#define BOXPACK(box,child,xpand,fill,pad) \
+	gtk_box_pack_start(GTK_BOX(box), child, xpand, fill, pad)
+
+#if GLIB_CHECK_VERSION(2,32,0)
+#define g_thread_create(func, data, join, err) g_thread_new("T", func, data)
+#define g_thread_init(x)
+#endif
 
 enum {
     COL_RIPTRACK,
@@ -148,12 +200,17 @@ enum {
 };
 
 typedef struct _prefs {
-    char* cdrom;
-    char* music_dir;
-    int make_playlist;
+    char drive[128]; // MANUAL, AUTO, DEFAULT, vendor+model
+    char cdrom[128]; // user-defined path
+    char tmp_cdrom[128]; // tmp user-defined path
+    char* cddb_server_name;
+    char* format_albumdir;
     char* format_music;
     char* format_playlist;
-    char* format_albumdir;
+    char* music_dir;
+    char* server_name;
+    char* log_file;
+    int make_playlist;
     int rip_wav;
     int rip_mp3;
     int mp3_vbr;
@@ -163,39 +220,38 @@ typedef struct _prefs {
     int eject_on_done;
     int do_cddb_updates;
     int use_proxy;
-    char* server_name;
     int port_number;
     int do_log;
     int max_log_size;
-    char* log_file;
-    char* cddb_server_name;
-    int cddb_port_number;
+    int cddb_port;
 } prefs;
 
 typedef struct _shared {
-	FILE * playlist_wav;
+	FILE *playlist_wav;
 	FILE *log_fd;
 	FILE *playlist_mp3;
 	GCond *available;
 	GList *disc_matches;
+	GList *drive_list;
+	gchar device[128]; // current cdrom device
 	GMutex *barrier;
-	GThread *cddb_query_thread;
+	GThread *cddb_thread;
 	GThread *encoder;
 	GThread *ripper;
 	GThread *tracker;
-	bool aborted; /* for canceling */
-	bool allDone; /* for stopping the tracking thread */
+	bool aborted; // for canceling
+	bool allDone; // for stopping the tracking thread
 	bool overwriteAll;
 	bool overwriteNone;
 	bool trace;
-	bool working; /* ripping or encoding, so that can know not to clear the tracklist on eject */
-	cddb_conn_t * cddb_query_thread_conn;
-	cddb_disc_t * cddb_query_thread_disc;
+	bool working; // ripping or encoding
+	cddb_conn_t *cddb_conn;
+	cddb_disc_t *cddb_disc;
 	double mp3_percent;
 	double rip_percent;
 	gboolean track_format[100];
-	int cddb_query_thread_num_matches;
-	int cddb_query_thread_running;
+	int cddb_matches;
+	int cddb_thread_running;
 	int counter;
 	int encode_tracks_completed;
 	int numCdparanoiaFailed;
@@ -208,46 +264,93 @@ typedef struct _shared {
 	pid_t lame_pid;
 } shared;
 
+typedef struct _cdrom {
+	gchar *model;
+	gchar *device;
+	int fd;
+} s_drive;
+
 // Global objects
 static GtkWidget *win_main = NULL;
 static GtkWidget *win_prefs = NULL;
-static prefs *global_prefs = NULL;
-static shared *global_data = NULL;
-
+static prefs *g_prefs = NULL;
+static shared *g_data = NULL;
 
 // Functions Prototypes
-static GtkWidget *ripping_bar( GtkWidget *table, char *name, int y);
+static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y);
 static GtkWidget* create_prefs (void);
 static bool prefs_are_valid(void);
 static bool string_has_slashes(const char* string);
-static char * prefs_get_music_dir(prefs * p);
+static char *prefs_get_music_dir(prefs *p);
 static gchar* get_config_path(const gchar *file_suffix);
 static gpointer encode_thread(gpointer data);
 static gpointer track_thread(gpointer data);
-static int exec_with_output(const char * args[], int toread, pid_t * p);
+static int exec_with_output(const char *args[], int toread, pid_t *p);
 static int is_valid_port_number(int number);
 static void disable_all_main_widgets(void);
 static void disable_mp3_widgets(void);
 static void dorip();
 static void enable_all_main_widgets(void);
 static void enable_mp3_widgets(void);
-static void get_prefs_from_widgets(prefs * p);
-static void on_cancel_clicked(GtkButton * button, gpointer user_data);
-static void save_prefs(prefs * p);
+static void get_prefs_from_widgets(prefs *p);
+static void on_cancel_clicked(GtkButton *button, gpointer user_data);
+static void save_prefs(prefs *p);
 static void set_status(char *text);
-static void set_widgets_from_prefs(prefs * p);
+static void set_widgets_from_prefs(prefs *p);
 static void sigchld();
 
+static s_drive* new_drive()
+{
+	s_drive *d = (s_drive *) g_malloc0(sizeof(s_drive));
+	d->fd = -1; // not opened
+	return d;
+}
 
+static s_drive* create_drive(gchar *device, gchar *model)
+{
+	s_drive *d = new_drive();
+	d->model = g_strdup(model);
+	d->device = g_strdup(device);
+	return d;
+}
+
+static void free_drive(gpointer data)
+{
+	if(data == NULL) return;
+	s_drive *drive = (s_drive*) data;
+	g_free(drive->model);
+	g_free(drive->device);
+	g_free(drive);
+}
+
+static s_drive* clone_drive(gpointer data)
+{
+	if(data == NULL) return NULL;
+	s_drive *drive = (s_drive *) data;
+	s_drive *clone = new_drive();
+	clone->model = g_strdup(drive->model);
+	clone->device = g_strdup(drive->device);
+	clone->fd = drive->fd;
+	return clone;
+}
+
+static bool drive_has_device(gpointer data, gchar *device)
+{
+	if(data == NULL) return FALSE;
+	if(device == NULL) return FALSE;
+	s_drive *drive = (s_drive *) data;
+	return (strcmp(drive->device, device) == 0);
+}
 
 /** Write current time in the log file. */
 static void log_time(FILE *fd)
 {
-	struct tm *d;
 	struct timeb s_timeb;
 	ftime(&s_timeb);
-	d = localtime(&s_timeb.time);
-	fprintf(fd, "\n#%02d/%02d/%04d %02d:%02d:%02d.%03u|", d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year, d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
+	struct tm *d = localtime(&s_timeb.time);
+	fprintf(fd, "\n#%02d/%02d/%04d %02d:%02d:%02d.%03u|",
+			d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year,
+			d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
 }
 
 /*! Get current time as a formatted date string: DD/MM/YYYY hh:mm:ss
@@ -260,52 +363,54 @@ static char* get_time_str(char time_str[32])
 	ftime(&s_timeb);
 	d = localtime(&s_timeb.time);
 	memset(time_str,0,32);
-	snprintf(time_str, 32, "%02d/%02d/%04d %02d:%02d:%02d.%03u", d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year, d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
+	snprintf(time_str, 32, "%02d/%02d/%04d %02d:%02d:%02d.%03u",
+			d->tm_mday, d->tm_mon + 1, 1900 + d->tm_year,
+			d->tm_hour, d->tm_min, d->tm_sec, s_timeb.millitm);
 	return time_str;
 }
 
 static bool log_init()
 {
-	struct stat sts;
-	char time_str[32];
 	char mode_write[] = "w";
 	char mode_append[] = "a";
-	char *fmode = mode_append;
 
-	global_data->log_fd = NULL; // We will not try to write traces if no log file is opened.
+	g_data->log_fd = NULL; // Don't write traces if no log file is opened.
 
-	if(!global_prefs->do_log)
+	if(!g_prefs->do_log)
 		return TRUE;
 
-	fmode = mode_append;
-	if(stat(global_prefs->log_file,&sts)==0) {
-		if(sts.st_size>global_prefs->max_log_size) { // File is too big, overwrite it.
+	char *fmode = mode_append;
+	struct stat sts;
+	if(stat(g_prefs->log_file,&sts)==0) {
+		if(sts.st_size>g_prefs->max_log_size) { // File too big, overwrite it.
 			fmode=mode_write;
 		}
 	}
-	if( (global_data->log_fd=fopen(global_prefs->log_file,fmode)) == NULL) {
-		fprintf(stderr,"Warning: cannot open log file '%s' in write mode\n", global_prefs->log_file);
+	if( (g_data->log_fd=fopen(g_prefs->log_file,fmode)) == NULL) {
+		fprintf(stderr,"Warning: cannot open log file '%s' in write mode\n",
+													g_prefs->log_file);
 		perror("fopen");
 		return FALSE;
 	}
-	global_data->trace = TRUE;
+	g_data->trace = TRUE;
+	char time_str[32];
 	get_time_str(time_str);
-	fprintf(global_data->log_fd, "\n\n ----- %s START -----", time_str);
-	fflush(global_data->log_fd);
+	fprintf(g_data->log_fd, "\n\n ----- %s START -----", time_str);
+	fflush(g_data->log_fd);
 	return TRUE;
 }
 
 static void log_end()
 {
-	if(global_data->log_fd == NULL) return;
-	if(!global_data->trace) return;
+	if(g_data->log_fd == NULL) return;
+	if(!g_data->trace) return;
 
 	char time_str[32];
 	get_time_str(time_str);
-	fprintf(global_data->log_fd, "\n ----- %s STOP -----\n", time_str);
-	fflush(global_data->log_fd);
-	fclose(global_data->log_fd);
-	global_data->log_fd = NULL;
+	fprintf(g_data->log_fd, "\n ----- %s STOP -----\n", time_str);
+	fflush(g_data->log_fd);
+	fclose(g_data->log_fd);
+	g_data->log_fd = NULL;
 }
 
 /** convert log level to string. */
@@ -327,21 +432,28 @@ static void log_gen(const char *func_name, int log_level, const char *fmt, ...)
 	static int n=0; // be persistent
 	FILE *fd = NULL;
 
-	if(global_data->trace == 0 && log_level != LOG_FATAL)
+	if(g_data->log_fd == NULL
+			&& log_level != LOG_FATAL
+			&& log_level != LOG_WARN)
 		return;
 
-	if(global_data->log_fd==NULL)
+	if(g_data->log_fd==NULL) {
+		// printf("LOGGING to stderr... %ld\n", fd);
 		fd = stderr;
-	else
-		fd = global_data->log_fd;
-
+	} else {
+		fd = g_data->log_fd;
+	}
 	va_list args;
-	log_time(fd);
-	fprintf(fd,"0x%04lX|%04d|%s|%s|", pthread_self(), ++n, strloglevel(log_level), func_name);
+	if(fd!=stderr) {
+		log_time(fd);
+		fprintf(fd,"0x%04lX|%04d|%s|%s|", pthread_self(), ++n,
+										strloglevel(log_level), func_name);
+	}
 	va_start(args,fmt);
 	vfprintf(fd, fmt, args);
 	va_end(args);
 	fflush(fd);
+	if(fd==stderr) printf("\n");
 }
 
 static int get_field(char *buf, char *filename, char *field, char **value)
@@ -395,7 +507,8 @@ static int get_field(char *buf, char *filename, char *field, char **value)
         if(memcmp(s, data, l) == 0) {
             s+=l;
             if(p - s > PSIZE - 2) {
-                log_gen(__func__, LOG_FATAL, "[%s] param value of [%s] is too long (%d)", filename, field, p-s+1);
+                TRACERROR("[%s] param value of [%s] is too long (%d)",
+							filename, field, p-s+1);
                 return 0;
             }
             *value = g_malloc0(p-s+4);
@@ -408,7 +521,7 @@ static int get_field(char *buf, char *filename, char *field, char **value)
         }
         p++;
     }
-    log_gen(__func__, LOG_WARN, "[%s] param %s not found", filename, field);
+    TRACEWARN("[%s] param %s not found", filename, field);
     return 0;
 }
 
@@ -424,11 +537,11 @@ static bool read_long(char *s, long *value)
 	return TRUE;
 }
 
-static long get_field_as_long(char *buf, char *filename, char *field, int *value)
+static long get_field_as_long(char *buf, char *file, char *field, int *value)
 {
 	char *num = NULL;
-	if(!get_field(buf, filename, field, &num)) {
-		log_gen(__func__, LOG_WARN, "missing field %s", field);
+	if(!get_field(buf, file, field, &num)) {
+		TRACEWARN("missing field %s", field);
 		return 0;
 	}
 	long ret = -1;
@@ -447,7 +560,7 @@ static int load_file(char *url, char **b)
 	if (url == NULL) return 0;
 	gsize sz = 0;
 	if(!g_file_get_contents(url, b, &sz, NULL)) {
-		log_gen(__func__, LOG_WARN, "Warning: could not load config file: %s", strerror(errno));
+		TRACEWARN("could not load config file: %s", strerror(errno));
 		return 0;
 	}
 	return 1;
@@ -468,7 +581,6 @@ static int is_directory(char *path) {
    }
    return S_ISDIR(st.st_mode);
 }
-
 
 static void fatalError(const char *message)
 {
@@ -492,7 +604,7 @@ static int mp3_quality_to_bitrate(int quality, bool vbr)
 			if (vbr) return 245;
 			else return 320;
 	}
-	log_gen(__func__, LOG_WARN, "called with bad parameter (%d)", quality);
+	TRACEWARN("called with bad parameter (%d)", quality);
 	if (vbr) return 225;
 	else return 256;
 }
@@ -506,7 +618,8 @@ static int mp3_quality_to_bitrate(int quality, bool vbr)
 //
 // NOTE: caller must free the returned string!
 // NOTE: any of the parameters may be NULL to be omitted
-static char *make_filename(const char *path, const char *dir, const char *file, const char *extension)
+static char *make_filename(const char *path, const char *dir, const char *file,
+														const char *extension)
 {
 	int len = 1;
 	char *ret = NULL;
@@ -517,7 +630,7 @@ static char *make_filename(const char *path, const char *dir, const char *file, 
 	if (file) len += strlen(file);
 	if (extension) len += strlen(extension) + 1;
 
-	ret = g_malloc0(sizeof(char) * len);
+	ret = g_malloc0(sizeof(char) *len);
 	if (path) {
 		strncpy(&ret[pos], path, strlen(path));
 		pos += strlen(path);
@@ -554,12 +667,12 @@ static char *make_filename(const char *path, const char *dir, const char *file, 
 // title - gets substituted for %T in format
 //
 // NOTE: caller must free the returned string!
-static char *parse_format(const char *format, int tracknum, const char *year, const char *artist, const char *album, const char *genre, const char *title)
+static char *parse_format(const char *format, int tracknum, const char *year,
+										const char *artist, const char *album,
+										const char *genre, const char *title)
 {
 	unsigned i = 0;
 	int len = 0;
-	char *ret = NULL;
-	int pos = 0;
 
 	for (i = 0; i < strlen(format); i++) {
 		if ((format[i] == '%') && (i + 1 < strlen(format))) {
@@ -591,8 +704,8 @@ static char *parse_format(const char *format, int tracknum, const char *year, co
 			len++;
 		}
 	}
-	ret = g_malloc0(sizeof(char) * (len + 1));
-
+	char *ret = g_malloc0(sizeof(char) * (len + 1));
+	int pos = 0;
 	for (i = 0; i < strlen(format); i++) {
 		if ((format[i] == '%') && (i + 1 < strlen(format))) {
 			switch (format[i + 1]) {
@@ -637,7 +750,6 @@ static char *parse_format(const char *format, int tracknum, const char *year, co
 				ret[pos] = '%';
 				pos += 1;
 			}
-
 			i++;	// skip the character after the %
 		} else {
 			ret[pos] = format[i];
@@ -662,7 +774,7 @@ static int program_exists(const char *name)
 			numpaths++;
 		}
 	}
-	char **paths = g_malloc0(sizeof(char *) * numpaths);
+	char **paths = g_malloc0(sizeof(char *) *numpaths);
 	numpaths = 1;
 	paths[0] = &strings[0];
 	for (i = 0; i < strlen(path); i++) {
@@ -691,8 +803,9 @@ static int program_exists(const char *name)
 
 // Uses mkdir() for every component of the path
 // and returns if any of those fails with anything other than EEXIST.
-static int recursive_mkdir(char *pathAndName, mode_t mode)
+static int recursive_mkdir(char *pathAndName)
 {
+	mode_t mode = S_IRWXU|S_IRWXG|S_IRWXO;
 	int count;
 	int pathAndNameLen = strlen(pathAndName);
 	int rc;
@@ -714,19 +827,14 @@ static int recursive_mkdir(char *pathAndName, mode_t mode)
 }
 
 // removes all instances of bad characters from the string
-//
 // str - the string to trim
 // bad - the sting containing all the characters to remove
 static void trim_chars(char *str, const char *bad)
 {
-	int i;
-	int pos;
 	int len = strlen(str);
-	unsigned b;
-
-	for (b = 0; b < strlen(bad); b++) {
-		pos = 0;
-		for (i = 0; i < len + 1; i++) {
+	for (unsigned b = 0; b < strlen(bad); b++) {
+		int pos = 0;
+		for (int i = 0; i < len + 1; i++) {
 			if (str[i] != bad[b]) {
 				str[pos] = str[i];
 				pos++;
@@ -760,27 +868,43 @@ static void trim_whitespace(char *str)
 	}
 }
 
-static GtkWidget *lookup_widget(GtkWidget * widget, const gchar * widget_name)
+static gchar *get_default_music_dir()
 {
+	return g_strdup_printf("%s/%s", getenv("HOME"), "Music");
+}
+
+static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name)
+{
+	if(widget == NULL) {
+		g_warning("Lookup widget is null for '%s'", name);
+		return NULL;
+	}
 	GtkWidget *parent = NULL;
 	for (;;) {
 		parent = widget->parent;
 		if (parent == NULL) break;
 		widget = parent;
 	}
-	GtkWidget *found_widget = (GtkWidget *) g_object_get_data(G_OBJECT(widget), widget_name);
+	GtkWidget *found_widget = (pWdg) g_object_get_data(G_OBJECT(widget), name);
 	if (!found_widget)
-		g_warning("Widget not found: %s", widget_name);
+		g_warning("Widget not found: %s", name);
 
 	return found_widget;
 }
 
-static void show_dialog(GtkMessageType type, GtkButtonsType buttons, char *fmt, ...)  {
+static GtkListStore *get_tracklist_store()
+{
+	return GTK_LIST_STORE(gtk_tree_view_get_model(LKP_TRACKLIST));
+}
+
+static void show_dialog(GtkMessageType type, GtkButtonsType btn, char *fmt, ...)
+{
     va_list args;
     va_start(args,fmt);
     gchar *txt = g_strdup_vprintf(fmt, args);
     va_end(args);
-    GtkWidget* dialog = gtk_message_dialog_new(GTK_WINDOW(win_main), GTK_DIALOG_DESTROY_WITH_PARENT, type, buttons, "%s", txt);
+    GtkWidget* dialog = gtk_message_dialog_new(GTK_WINDOW(win_main),
+					GTK_DIALOG_DESTROY_WITH_PARENT, type, btn, "%s", txt);
     gtk_dialog_run (GTK_DIALOG (dialog));
     gtk_widget_destroy (dialog);
     g_free(txt);
@@ -789,172 +913,256 @@ static void show_dialog(GtkMessageType type, GtkButtonsType buttons, char *fmt, 
 static void clear_widgets()
 {
 	// hide the widgets for multiple albums
-	gtk_widget_hide(LKP_MAIN("disc"));
+	gtk_widget_hide(LKP_MAIN(WDG_DISC));
 	gtk_widget_hide(LKP_MAIN(WDG_PICK_DISC));
 	// clear the textboxes
 	CLEAR_TEXT("album_artist");
 	CLEAR_TEXT("album_title");
-	CLEAR_TEXT("album_genre");
-	CLEAR_TEXT("album_year");
+	CLEAR_TEXT(WDG_ALBUM_GENRE);
+	CLEAR_TEXT(WDG_ALBUM_YEAR);
 	// clear the tracklist
-	gtk_tree_view_set_model(GTK_TREE_VIEW(LKP_MAIN("tracklist")), NULL);
+	gtk_tree_view_set_model(LKP_TRACKLIST, NULL);
 	// disable the "rip" button
-	gtk_widget_set_sensitive(LKP_MAIN("rip_button"), FALSE);
+	gtk_widget_set_sensitive(LKP_MAIN(WDG_RIP), FALSE);
 }
 
-static bool check_disc(char *cdrom)
+static GdkPixbuf *LoadMainIcon()
 {
-	// open the device
-	int fd = open(cdrom, O_RDONLY | O_NONBLOCK);
-	if (fd < 0) {
-		log_gen(__func__, LOG_WARN, "Error: Couldn't open %s", cdrom);
+	GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+	GError* error = NULL;
+	gdk_pixbuf_loader_write(loader, pixmaps_irongrip_png,
+							pixmaps_irongrip_png_len, &error);
+	if (error) {
+		g_warning("Unable to load logo : %s\n", error->message);
+		g_error_free(error);
+		return NULL;
+	}
+	gdk_pixbuf_loader_close(loader,NULL);
+	GdkPixbuf* icon = gdk_pixbuf_loader_get_pixbuf(loader);
+	return icon;
+}
+
+static GList *get_drives_to_open()
+{
+	GList *r = NULL;
+	gchar *d = g_prefs->drive;
+
+	if(!d) {
+		TRACEWARN("No preferred drive.");
+		goto end;
+	}
+	if(strcmp(d,"MANUAL")==0) {
+		r = g_list_append(r, create_drive(g_prefs->cdrom, d));
+		goto end;
+	}
+	if(strcmp(d,"DEFAULT")==0) {
+		r = g_list_append(r, create_drive("/dev/cdrom", d));
+		goto end;
+	}
+	GList *l = g_data->drive_list;
+	if(!l || g_list_length(l) == 0) {
+		TRACEWARN("NO DRIVE LIST");
+		goto end;
+	}
+	if(strcmp(d,"AUTO")==0) {
+		for (GList *c = g_list_first(l); c != NULL; c = g_list_next(c)) {
+			if(drive_has_device(c->data, g_data->device))
+				r = g_list_prepend(r,clone_drive(c->data));
+			else
+				r = g_list_append(r,clone_drive(c->data));
+		}
+		goto end;
+	}
+	for (GList *c = g_list_first(l); c != NULL; c = g_list_next(c)) {
+		s_drive *s = (s_drive *) c->data;
+		if(strcmp(d,s->model)==0) {
+			r = g_list_append(r,clone_drive(c->data));
+			break;
+		}
+	}
+
+end:
+	if(!r) {
+		TRACEWARN("NO DRIVE TO OPEN.");
+	} else {
+		//TRACEINFO("%d drives to open.", g_list_length(r));
+	}
+	return r;
+}
+
+static bool check_disc()
+{
+	static bool alreadyCleared = true; // no clear when program just started
+	static bool alreadyGood = false; // check when program just started
+									// true when good disc inserted
+	bool drive_opened = false;
+	GList *l = get_drives_to_open();
+	if(!l) {
+		set_status("Error: cannot find any cdrom drive !");
+		alreadyGood = false;
 		return false;
 	}
-	static bool alreadyKnowGood = false;	/* check when program just started */
-	static bool alreadyCleared = true;	/* no need to clear when program just started */
-
-	bool ret = false;
-	int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
-	if (status == CDS_AUDIO || status == CDS_MIXED) {
-		if (!alreadyKnowGood) {
-			ret = true;
-			alreadyKnowGood = true;	/* don't return true again for this disc */
-			alreadyCleared = false;	/* clear when disc is removed */
+	for (GList *c = g_list_first(l); c != NULL; c = g_list_next(c)) {
+		s_drive *s = (s_drive *) c->data;
+		int	fd = open(s->device, O_RDONLY | O_NONBLOCK);
+		if (fd < 0) {
+			continue;
 		}
+		drive_opened = true;
+		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
+		close(fd);
+		if (status == CDS_AUDIO || status == CDS_MIXED) {
+			if (!alreadyGood || strcmp(s->device,g_data->device)) {
+				alreadyGood = true;	// don't return true again for this disc
+				alreadyCleared = false;	// clear when disc is removed
+				strcpy(g_data->device, s->device);
+				return true;
+			} else {
+				return false; // do not re-read cddb
+			}
+		}
+	}
+	alreadyGood = false;
+	if (!drive_opened) {
+		set_status("Error: cannot access to the cdrom drive !");
 	} else {
-		alreadyKnowGood = false;	/* return true when good disc inserted */
+		set_status("Please insert an audio disc in the cdrom drive...");
 		if (!alreadyCleared) {
 			alreadyCleared = true;
 			clear_widgets();
 		}
 	}
-	close(fd);
-	return ret;
+	return false;
 }
 
-static GtkTreeModel *create_model_from_disc(cddb_disc_t * disc)
+static GtkTreeModel *create_model_from_disc(cddb_disc_t *disc)
 {
-	GtkListStore *store = gtk_list_store_new(NUM_COLS, G_TYPE_BOOLEAN,	/* rip? checkbox */
-				   G_TYPE_UINT,	/* track number */
-				   G_TYPE_STRING,	/* track artist */
-				   G_TYPE_STRING,	/* track title */
-				   G_TYPE_STRING,	/* track time */
-				   G_TYPE_STRING,	/* genre */
-				   G_TYPE_STRING	/* year */
+	GtkListStore *store = gtk_list_store_new(NUM_COLS,
+					G_TYPE_BOOLEAN,	// rip? checkbox
+					G_TYPE_UINT,	// track number
+					G_TYPE_STRING,	// track artist
+					G_TYPE_STRING,	// track title
+					G_TYPE_STRING,	// track time
+					G_TYPE_STRING,	// genre
+					G_TYPE_STRING	// year
 	    );
 
-	cddb_track_t *track;
-	for (track = cddb_disc_get_track_first(disc); track != NULL; track = cddb_disc_get_track_next(disc)) {
+	for (cddb_track_t *track = cddb_disc_get_track_first(disc);
+			track != NULL; track = cddb_disc_get_track_next(disc)) {
 		int seconds = cddb_track_get_length(track);
 		char time[6];
 		snprintf(time, 6, "%02d:%02d", seconds / 60, seconds % 60);
 
-		char *track_artist = (char *)cddb_track_get_artist(track);
-		SANITIZE(track_artist);
+		char *artist = (char *)cddb_track_get_artist(track);
+		SANITIZE(artist);
 
-		char *track_title = (char *)cddb_track_get_title(track);	//!! this returns const char*
-		SANITIZE(track_title);
+		char *title = (char *)cddb_track_get_title(track);
+		SANITIZE(title);
 
 		char year_str[5];
 		snprintf(year_str, 5, "%d", cddb_disc_get_year(disc));
 		year_str[4] = '\0';
 
+		int number = cddb_track_get_number(track);
+
 		GtkTreeIter iter;
 		gtk_list_store_append(store, &iter);
 		gtk_list_store_set(store, &iter,
-				   COL_RIPTRACK, global_data->track_format[cddb_track_get_number(track)],
-				   COL_TRACKNUM, cddb_track_get_number(track),
-				   COL_TRACKARTIST, track_artist,
-				   COL_TRACKTITLE, track_title,
-				   COL_TRACKTIME, time, COL_GENRE, cddb_disc_get_genre(disc), COL_YEAR, year_str, -1);
+					   COL_RIPTRACK, g_data->track_format[number],
+					   COL_TRACKNUM, number,
+					   COL_TRACKARTIST, artist,
+					   COL_TRACKTITLE, title,
+					   COL_TRACKTIME, time,
+					   COL_GENRE, cddb_disc_get_genre(disc),
+					   COL_YEAR, year_str, -1);
 	}
 	return GTK_TREE_MODEL(store);
 }
 
 static void eject_disc(char *cdrom)
 {
+	if(!cdrom) return;
 	int fd = open(cdrom, O_RDONLY | O_NONBLOCK);
 	if (fd < 0) {
-		log_gen(__func__, LOG_WARN, "Error: Couldn't open %s", cdrom);
+		TRACEWARN("Couldn't open %s", cdrom);
 		return;
 	}
 	ioctl(fd, CDROM_LOCKDOOR, 0);
 	int eject = ioctl(fd, CDROMEJECT, 0 /* CDSL_CURRENT */);
 	if(eject < 0) {
-		perror("ioctl");
-		log_gen(__func__, LOG_INFO, "Eject returned %d", eject);
-
-		// TODO: use '/usr/bin/eject' on ubuntu because ioctl seems to work only as root
+		// perror("ioctl");
+		TRACEINFO("Eject returned %d", eject);
+		// TODO: use '/usr/bin/eject' on ubuntu because
+		//			 ioctl seems to work only as root
 	}
 	close(fd);
 }
 
-static gpointer cddb_query_thread_run(gpointer data)
+static gpointer cddb_thread_run(gpointer data)
 {
-	global_data->cddb_query_thread_num_matches = cddb_query(global_data->cddb_query_thread_conn, global_data->cddb_query_thread_disc);
-	log_gen(__func__, LOG_INFO, "Got %d matches for CDDB QUERY.", global_data->cddb_query_thread_num_matches);
-	if (global_data->cddb_query_thread_num_matches == -1)
-		global_data->cddb_query_thread_num_matches = 0;
+	g_data->cddb_matches = cddb_query(g_data->cddb_conn, g_data->cddb_disc);
+	TRACEINFO("Got %d matches for CDDB QUERY.", g_data->cddb_matches);
+	if (g_data->cddb_matches == -1)
+		g_data->cddb_matches = 0;
 
-	g_atomic_int_set(&global_data->cddb_query_thread_running, 0);
+	g_atomic_int_set(&g_data->cddb_thread_running, 0);
 	return NULL;
 }
 
-static GList *lookup_disc(cddb_disc_t * disc)
+static GList *lookup_disc(cddb_disc_t *disc)
 {
 	// set up the connection to the cddb server
-	global_data->cddb_query_thread_conn = cddb_new();
-	if (global_data->cddb_query_thread_conn == NULL)
+	g_data->cddb_conn = cddb_new();
+	if (g_data->cddb_conn == NULL)
 		fatalError("cddb_new() failed. Out of memory?");
 
-	cddb_set_server_name(global_data->cddb_query_thread_conn, global_prefs->cddb_server_name);
-	cddb_set_server_port(global_data->cddb_query_thread_conn, global_prefs->cddb_port_number);
+	cddb_set_server_name(g_data->cddb_conn, g_prefs->cddb_server_name);
+	cddb_set_server_port(g_data->cddb_conn, g_prefs->cddb_port);
 
-	if (global_prefs->use_proxy) {
-		cddb_set_http_proxy_server_name(global_data->cddb_query_thread_conn, global_prefs->server_name);
-		cddb_set_http_proxy_server_port(global_data->cddb_query_thread_conn, global_prefs->port_number);
-		cddb_http_proxy_enable(global_data->cddb_query_thread_conn);
+	if (g_prefs->use_proxy) {
+		cddb_set_http_proxy_server_name(g_data->cddb_conn, g_prefs->server_name);
+		cddb_set_http_proxy_server_port(g_data->cddb_conn, g_prefs->port_number);
+		cddb_http_proxy_enable(g_data->cddb_conn);
 	}
 	// query cddb to find similar discs
-	g_atomic_int_set(&global_data->cddb_query_thread_running, 1);
-	global_data->cddb_query_thread_disc = disc;
-	global_data->cddb_query_thread = g_thread_create(cddb_query_thread_run, NULL, TRUE, NULL);
+	g_atomic_int_set(&g_data->cddb_thread_running, 1);
+	g_data->cddb_disc = disc;
+	g_data->cddb_thread = g_thread_create(cddb_thread_run, NULL, TRUE, NULL);
 
 	// show cddb update window
 	gdk_threads_enter();
 	disable_all_main_widgets();
 
-	GtkWidget *statusLbl = LKP_MAIN("statusLbl");
-	gtk_label_set_text(GTK_LABEL(statusLbl), _("<b>Getting disc info from the internet...</b>"));
-	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
+	GtkLabel *status = GTK_LABEL(LKP_MAIN(WDG_STATUS));
+	gtk_label_set_text(status, _("<b>Getting disc info from the internet...</b>"));
+	gtk_label_set_use_markup(status, TRUE);
 
-	while (g_atomic_int_get(&global_data->cddb_query_thread_running) != 0) {
+	while (g_atomic_int_get(&g_data->cddb_thread_running) != 0) {
 		while (gtk_events_pending())
 			gtk_main_iteration();
 		Sleep(300);
 	}
-	gtk_label_set_text(GTK_LABEL(statusLbl), "Query finished.");
+	gtk_label_set_text(status, "Query finished.");
 	enable_all_main_widgets();
 	gdk_threads_leave();
 
 	// make a list of all the matches
 	GList *matches = NULL;
-	int i;
-	for (i = 0; i < global_data->cddb_query_thread_num_matches; i++) {
+	for (int i = 0; i < g_data->cddb_matches; i++) {
 		cddb_disc_t *possible_match = cddb_disc_clone(disc);
-		if (!cddb_read(global_data->cddb_query_thread_conn, possible_match)) {
-			cddb_error_print(cddb_errno(global_data->cddb_query_thread_conn));
+		if (!cddb_read(g_data->cddb_conn, possible_match)) {
+			cddb_error_print(cddb_errno(g_data->cddb_conn));
 			fatalError("cddb_read() failed.");
 		}
 		matches = g_list_append(matches, possible_match);
 
 		// move to next match
-		if (i < global_data->cddb_query_thread_num_matches - 1) {
-			if (!cddb_query_next(global_data->cddb_query_thread_conn, disc))
+		if (i < g_data->cddb_matches - 1) {
+			if (!cddb_query_next(g_data->cddb_conn, disc))
 				fatalError("Query index out of bounds.");
 		}
 	}
-	cddb_destroy(global_data->cddb_query_thread_conn);
+	cddb_destroy(g_data->cddb_conn);
 	return matches;
 }
 
@@ -962,7 +1170,7 @@ static cddb_disc_t *read_disc(char *cdrom)
 {
 	int fd = open(cdrom, O_RDONLY | O_NONBLOCK);
 	if (fd < 0) {
-		log_gen(__func__, LOG_WARN, "Error: Couldn't open %s", cdrom);
+		TRACEWARN("Couldn't open %s", cdrom);
 		return NULL;
 	}
 	cddb_disc_t *disc = NULL;
@@ -974,48 +1182,50 @@ static cddb_disc_t *read_disc(char *cdrom)
 	}
 	// see if we can read the disc's table of contents (TOC).
 	struct cdrom_tochdr th;
-	if (ioctl(fd, CDROMREADTOCHDR, &th) == 0) {
-		log_gen(__func__, LOG_INFO, "starting track: %d", th.cdth_trk0);
-		log_gen(__func__, LOG_INFO, "ending track: %d", th.cdth_trk1);
+	if (ioctl(fd, CDROMREADTOCHDR, &th) != 0)
+		goto end;
 
-		disc = cddb_disc_new();
-		if (disc == NULL)
-			fatalError("cddb_disc_new() failed. Out of memory?");
+	TRACEINFO("starting track: %d", th.cdth_trk0);
+	TRACEINFO("ending track: %d", th.cdth_trk1);
+	disc = cddb_disc_new();
+	if (disc == NULL)
+		fatalError("cddb_disc_new() failed. Out of memory?");
 
-		struct cdrom_tocentry te;
-		te.cdte_format = CDROM_LBA;
-		int i;
-		for (i = th.cdth_trk0; i <= th.cdth_trk1; i++) {
-			te.cdte_track = i;
-			if (ioctl(fd, CDROMREADTOCENTRY, &te) == 0) {
-				if (te.cdte_ctrl & CDROM_DATA_TRACK) {
-					// track is a DATA track. make sure its "rip" box is not checked by default
-					global_data->track_format[i] = FALSE;
-				} else {
-					global_data->track_format[i] = TRUE;
-				}
-				cddb_track_t *track = cddb_track_new();
-				if (track == NULL) fatalError("cddb_track_new() failed. Out of memory?");
+	struct cdrom_tocentry te;
+	te.cdte_format = CDROM_LBA;
+	for (int i = th.cdth_trk0; i <= th.cdth_trk1; i++) {
+		te.cdte_track = i;
+		if (ioctl(fd, CDROMREADTOCENTRY, &te) != 0)
+			continue;
 
-				char trackname[9];
-				cddb_track_set_frame_offset(track, te.cdte_addr.lba + SECONDS_TO_FRAMES(2));
-				snprintf(trackname, 9, "Track %d", i);
-				cddb_track_set_title(track, trackname);
-				cddb_track_set_artist(track, "Unknown Artist");
-				cddb_disc_add_track(disc, track);
-			}
+		if (te.cdte_ctrl & CDROM_DATA_TRACK) {
+			// DATA track. "rip" box not checked by default
+			g_data->track_format[i] = FALSE;
+		} else {
+			g_data->track_format[i] = TRUE;
 		}
-		te.cdte_track = CDROM_LEADOUT;
-		if (ioctl(fd, CDROMREADTOCENTRY, &te) == 0) {
-			cddb_disc_set_length(disc, (te.cdte_addr.lba + SECONDS_TO_FRAMES(2)) / SECONDS_TO_FRAMES(1));
-		}
+		cddb_track_t *trk = cddb_track_new();
+		if (trk == NULL)
+			fatalError("cddb_track_new() failed. Out of memory?");
+
+		cddb_track_set_frame_offset(trk, te.cdte_addr.lba + SECONDS_TO_FRAMES(2));
+		char trackname[9];
+		snprintf(trackname, 9, "Track %d", i);
+		cddb_track_set_title(trk, trackname);
+		cddb_track_set_artist(trk, "Unknown Artist");
+		cddb_disc_add_track(disc, trk);
+	}
+	te.cdte_track = CDROM_LEADOUT;
+	if (ioctl(fd, CDROMREADTOCENTRY, &te) == 0) {
+		cddb_disc_set_length(disc, (te.cdte_addr.lba + SECONDS_TO_FRAMES(2))
+				/ SECONDS_TO_FRAMES(1));
 	}
 end:
 	close(fd);
 	return disc;
 }
 
-static void update_tracklist(cddb_disc_t * disc)
+static void update_tracklist(cddb_disc_t *disc)
 {
 	cddb_track_t *track;
 	char *disc_artist = (char *)cddb_disc_get_artist(disc);
@@ -1024,101 +1234,178 @@ static void update_tracklist(cddb_disc_t * disc)
 
 	if (disc_artist != NULL) {
 		SANITIZE(disc_artist);
-		gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_artist")), disc_artist);
+		SET_MAIN_TEXT("album_artist", disc_artist);
 
 		bool singleartist= true;
-		for (track = cddb_disc_get_track_first(disc); track != NULL; track = cddb_disc_get_track_next(disc)) {
+		for (track = cddb_disc_get_track_first(disc);
+				track != NULL; track = cddb_disc_get_track_next(disc)) {
 			if (strcmp(disc_artist, cddb_track_get_artist(track)) != 0) {
 				singleartist = false;
 				break;
 			}
 		}
-		TOGGLE_ACTIVE("single_artist", singleartist);
+		TOGGLE_ACTIVE(WDG_SINGLE_ARTIST, singleartist);
 	}
 	if (disc_title != NULL) {
 		SANITIZE(disc_title);
-		gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_title")), disc_title);
+		SET_MAIN_TEXT(WDG_ALBUM_TITLE, disc_title);
 	}
 	if (disc_genre) {
 		SANITIZE(disc_genre);
-		gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_genre")), disc_genre);
+		SET_MAIN_TEXT(WDG_ALBUM_GENRE, disc_genre);
 	} else {
-		gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_genre")), "Unknown");
+		SET_MAIN_TEXT(WDG_ALBUM_GENRE, "Unknown");
 	}
 	unsigned disc_year = cddb_disc_get_year(disc);
 	if (disc_year == 0) disc_year = 1900;
 
-	char disc_year_char[5];
-	snprintf(disc_year_char, 5, "%d", disc_year);
-	gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_year")), disc_year_char);
-	TOGGLE_ACTIVE("single_genre", true);
+	gchar *album_year = g_strdup_printf("%d", disc_year);
+	SET_MAIN_TEXT(WDG_ALBUM_YEAR, album_year);
+	g_free(album_year);
+	TOGGLE_ACTIVE(WDG_SINGLE_GENRE, true);
 	GtkTreeModel *model = create_model_from_disc(disc);
-	gtk_tree_view_set_model(GTK_TREE_VIEW(LKP_MAIN("tracklist")), model);
+	gtk_tree_view_set_model(LKP_TRACKLIST, model);
 	g_object_unref(model);
 }
 
-static void refresh(char *cdrom, int force)
+static char* get_device_info(char *dev, char *field)
 {
-	if (global_data->working) // don't do anything
-		return;
-
-	if (!check_disc(cdrom) && !force) {
-		return;
+	gchar *path = g_strconcat("/sys/block/",dev,"/device/",field,NULL);
+	FILE *fd = fopen (path, "r");
+	g_free(path);
+	if(!fd) return g_strconcat("(unknown ",field,")",NULL);
+	char b[256];
+	char *p = NULL;
+	if(fgets(b, sizeof(b), fd) != NULL) {
+		g_strstrip(b);
+		p = g_strdup(b);
 	}
-	cddb_disc_t *disc = read_disc(cdrom);
-	if (disc == NULL) return;
+	fclose(fd);
+	// printf("%s=[%s]\n",field,p);
+	return (p ? p : g_strconcat("(error in ",field,")",NULL));
+}
 
-	gtk_widget_set_sensitive(LKP_MAIN("rip_button"), TRUE);
+static GList* get_cdrom_info(char *str)
+{
+	GList *matches = NULL;
+	g_strstrip(str);
+	gchar **list = g_strsplit(str,"\t",-1);
+	for (gchar **ptr = list; *ptr; ptr++) {
+		s_drive *drive = new_drive();
+		drive->device = g_strconcat("/dev/",*ptr,NULL);
+		gchar *v = get_device_info(*ptr,"vendor");
+		gchar *m = get_device_info(*ptr,"model");
+		drive->model = g_strconcat(v," ",m,NULL);
+		g_free(v);
+		g_free(m);
+		matches = g_list_append(matches, drive);
+	}
+	g_strfreev(list);
+	return matches;
+}
+
+static bool seek_cdrom()
+{
+	const char* cdinfo = "/proc/sys/dev/cdrom/info";
+	struct stat s;
+	if (stat(cdinfo, &s) != 0) {
+		perror("stat");
+		return false;
+	}
+	FILE *fd = fopen (cdinfo, "r");
+	if (!fd) {
+		perror("open cdinfo");
+		return false;
+	}
+	const int sz = 1024;
+	char buf[sz+1];
+	const char* drive = "drive name:";
+	int l = strlen(drive);
+	while(fgets(buf, sz, fd) != NULL) {
+		// printf("READ %s\n%s\n", cdinfo, buf);
+		if(0 ==  memcmp(buf, drive, l)){
+			if(g_data->drive_list)
+				g_list_free_full(g_data->drive_list, free_drive);
+			g_data->drive_list = get_cdrom_info(buf+l);
+			break;
+		}
+	}
+	fclose (fd);
+	if (g_data->drive_list == NULL
+			|| g_list_length(g_data->drive_list) == 0) {
+		char* NOCDROM = "No CD-ROM drive found on this machine.";
+		TRACEWARN(NOCDROM);
+		set_status(NOCDROM);
+		return false;
+	}
+	return true;
+}
+
+static bool refresh(int force)
+{
+	seek_cdrom();
+
+	if (g_data->working) // don't do anything
+		return true;
+
+	if (!check_disc()) {
+		if(!force) {
+			return false;
+		} else {
+			// printf("Forced.\n");
+		}
+	}
+	cddb_disc_t *disc = read_disc(g_data->device);
+	if (disc == NULL) return true;
+	gtk_widget_set_sensitive(LKP_MAIN(WDG_RIP), TRUE);
 
 	// show the temporary info
-	gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_artist")), "Unknown Artist");
-	gtk_entry_set_text(GTK_ENTRY(LKP_MAIN("album_title")), "Unknown Album");
+	SET_MAIN_TEXT("album_artist", "Unknown Artist");
+	SET_MAIN_TEXT("album_title", "Unknown Album");
 	update_tracklist(disc);
+	if (!g_prefs->do_cddb_updates && !force)
+		return true;
 
-	if (!global_prefs->do_cddb_updates && !force)
-		return;
-
-	global_data->disc_matches = lookup_disc(disc);
+	g_data->disc_matches = lookup_disc(disc);
 	cddb_disc_destroy(disc);
-	if (global_data->disc_matches == NULL) {
-		log_gen(__func__, LOG_WARN, "No disc matches !");
-		return;
+	if (g_data->disc_matches == NULL) {
+		TRACEWARN("No disc matches !");
+		return true;
 	}
 	// fill in and show the album drop-down box
-	if (g_list_length(global_data->disc_matches) > 1) {
+	if (g_list_length(g_data->disc_matches) > 1) {
 		GtkListStore *store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
 		GtkTreeIter iter;
-		GList *curr;
-		cddb_disc_t *tempdisc;
-
-		for (curr = g_list_first(global_data->disc_matches); curr != NULL; curr = g_list_next(curr)) {
-			char *artist = NULL;
-			char *title = NULL;
-
-			tempdisc = (cddb_disc_t *) curr->data;
-			artist =  (char *) cddb_disc_get_artist(tempdisc);
-			title =  (char *) cddb_disc_get_title(tempdisc);
-			log_gen(__func__, LOG_INFO, "Artist: [%s] Title [%s]", artist, title);
-
+		for (GList *curr = g_list_first(g_data->disc_matches);
+				curr != NULL; curr = g_list_next(curr)) {
+			cddb_disc_t *tempdisc = (cddb_disc_t *) curr->data;
+			char *artist = (char *) cddb_disc_get_artist(tempdisc);
+			char *title = (char *) cddb_disc_get_title(tempdisc);
+			TRACEINFO("Artist: [%s] Title [%s]", artist, title);
 			gtk_list_store_append(store, &iter);
 			gtk_list_store_set(store, &iter, 0, artist, 1, title, -1);
 		}
-		gtk_combo_box_set_model(GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC)), GTK_TREE_MODEL(store));
-		gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC)), 1);
-		gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC)), 0);
-		WIDGET_SHOW("disc");
+		GtkComboBox *pick_disc = GTK_COMBO_BOX(LKP_MAIN(WDG_PICK_DISC));
+		gtk_combo_box_set_model (pick_disc, GTK_TREE_MODEL(store));
+		gtk_combo_box_set_active(pick_disc, 1);
+		gtk_combo_box_set_active(pick_disc, 0);
+		WIDGET_SHOW(WDG_DISC);
 		WIDGET_SHOW(WDG_PICK_DISC);
 	}
-	update_tracklist((cddb_disc_t *) g_list_nth_data(global_data->disc_matches, 0));
+	disc = g_list_nth_data(g_data->disc_matches, 0);
+	update_tracklist(disc);
+	return true;
 }
 
-static gboolean for_each_row_deselect(GtkTreeModel * model, GtkTreePath * path, GtkTreeIter * iter, gpointer data)
+static gboolean for_each_row_deselect(GtkTreeModel *model, GtkTreePath *path,
+										GtkTreeIter *iter, gpointer data)
 {
     gtk_list_store_set(GTK_LIST_STORE(model), iter, COL_RIPTRACK, 0, -1);
     return FALSE;
 }
 
-static gboolean for_each_row_select(GtkTreeModel * model, GtkTreePath * path, GtkTreeIter * iter, gpointer data)
+static gboolean for_each_row_select(GtkTreeModel *model, GtkTreePath *path,
+										GtkTreeIter *iter, gpointer data)
 {
     gtk_list_store_set(GTK_LIST_STORE(model), iter, COL_RIPTRACK, 1, -1);
     return FALSE;
@@ -1126,34 +1413,42 @@ static gboolean for_each_row_select(GtkTreeModel * model, GtkTreePath * path, Gt
 
 static gboolean idle(gpointer data)
 {
-    refresh(global_prefs->cdrom, 0);
+    refresh(0);
     return (data != NULL);
 }
 
 static gboolean scan_on_startup(gpointer data)
 {
-    log_gen(__func__, LOG_INFO, "scan_on_startup");
-    refresh(global_prefs->cdrom, 0);
+    TRACEINFO("scan_on_startup");
+    refresh(0);
     return (data != NULL);
 }
 
-static gboolean on_year_focus_out_event(GtkWidget * widget, GdkEventFocus * event, gpointer user_data)
+static gboolean on_cdrom_focus_out(GtkWidget *widget, GdkEventFocus *event,
+														gpointer user_data)
 {
 	const gchar *ctext = gtk_entry_get_text(GTK_ENTRY(widget));
-	gchar *text = g_malloc0(5);
-	strncpy(text, ctext, 5);
-	text[4] = '\0';
-
-	if ((text[0] != '1' && text[0] != '2') || text[1] < '0' || text[1] > '9' ||
-	    text[2] < '0' || text[2] > '9' || text[3] < '0' || text[3] > '9') {
-		sprintf(text, "1900");
-	}
-	gtk_entry_set_text(GTK_ENTRY(widget), text);
-	g_free(text);
+	strcpy(g_prefs->tmp_cdrom, ctext);
 	return FALSE;
 }
 
-static gboolean on_field_focus_out_event(GtkWidget * widget)
+static gboolean on_year_focus_out(GtkWidget *widget, GdkEventFocus *event,
+														gpointer user_data)
+{
+	const gchar *ctext = gtk_entry_get_text(GTK_ENTRY(widget));
+	gchar *txt = g_malloc0(5);
+	strncpy(txt, ctext, 5);
+	txt[4] = '\0';
+	if ((txt[0] != '1' && txt[0] != '2') || txt[1] < '0' || txt[1] > '9' ||
+	    txt[2] < '0' || txt[2] > '9' || txt[3] < '0' || txt[3] > '9') {
+		sprintf(txt, "1900");
+	}
+	gtk_entry_set_text(GTK_ENTRY(widget), txt);
+	g_free(txt);
+	return FALSE;
+}
+
+static gboolean on_field_focus_out_event(GtkWidget *widget)
 {
 	const gchar *ctext = gtk_entry_get_text(GTK_ENTRY(widget));
 	gchar *text = g_strdup(ctext);
@@ -1167,122 +1462,153 @@ static gboolean on_field_focus_out_event(GtkWidget * widget)
 	return FALSE;
 }
 
-static gboolean on_album_artist_focus_out_event(GtkWidget * widget, GdkEventFocus * event, gpointer user_data)
+static gboolean on_album_artist_focus_out(GtkWidget *widget,
+									GdkEventFocus *event, gpointer user_data)
 {
 	return on_field_focus_out_event(widget);
 }
-static gboolean on_album_title_focus_out_event(GtkWidget * widget, GdkEventFocus * event, gpointer user_data)
+static gboolean on_album_title_focus_out(GtkWidget *widget,
+									GdkEventFocus *event, gpointer user_data)
 {
 	return on_field_focus_out_event(widget);
 }
-static gboolean on_album_genre_focus_out_event(GtkWidget * widget, GdkEventFocus * event, gpointer user_data)
+static gboolean on_album_genre_focus_out(GtkWidget *widget,
+									GdkEventFocus *event, gpointer user_data)
 {
 	return on_field_focus_out_event(widget);
 }
 
-static void on_artist_edited(GtkCellRendererText * cell, gchar * path_string, gchar * new_text, gpointer user_data)
+static void on_artist_edited(GtkCellRendererText *cell, gchar *path,
+										gchar *new_text, gpointer user_data)
 {
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
+	GtkListStore *store = get_tracklist_store();
 	SANITIZE(new_text);
 	GtkTreeIter iter;
-	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path_string);
+	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path);
 	if (new_text[0] == '\0')
 		gtk_list_store_set(store, &iter, COL_TRACKARTIST, STR_UNKNOWN, -1);
 	else
 		gtk_list_store_set(store, &iter, COL_TRACKARTIST, new_text, -1);
 }
 
-static void on_genre_edited(GtkCellRendererText * cell, gchar * path_string, gchar * new_text, gpointer user_data)
+static void on_genre_edited(GtkCellRendererText *cell, gchar *path,
+										gchar *new_text, gpointer user_data)
 {
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
+	GtkListStore *store = get_tracklist_store();
 	SANITIZE(new_text);
 	GtkTreeIter iter;
-	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path_string);
+	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path);
 	if (new_text[0] == '\0')
 		gtk_list_store_set(store, &iter, COL_GENRE, STR_UNKNOWN, -1);
 	else
 		gtk_list_store_set(store, &iter, COL_GENRE, new_text, -1);
 }
 
-static void on_deselect_all_click(GtkMenuItem * menuitem, gpointer data)
+static void on_deselect_all_click(GtkMenuItem *menuitem, gpointer data)
 {
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST)));
+	GtkTreeModel *model = gtk_tree_view_get_model(LKP_TRACKLIST);
 	gtk_tree_model_foreach(model, for_each_row_deselect, NULL);
 }
 
-static void on_vbr_toggled(GtkToggleButton * togglebutton, gpointer user_data)
+static void adjust_mp3_vbr()
 {
-	/* update the displayed vbr, as it's different for vbr and non-vbr */
-	bool vbr = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(togglebutton));
-	gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (LKP_PREF("combo_mp3_quality")));
-	char bitrate[8];
-	snprintf(bitrate, 8, _("%d Kbps"), mp3_quality_to_bitrate(index, vbr));
-	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
-
+	GtkToggleButton *vbr_button = GTK_TOGGLE_BUTTON(LKP_PREF(WDG_MP3VBR));
+	gint i = gtk_combo_box_get_active(COMBO_MP3Q);
+	bool vbr = gtk_toggle_button_get_active(vbr_button);
+	gchar *rate = g_strdup_printf(_("%d Kbps"), mp3_quality_to_bitrate(i, vbr));
+	gtk_label_set_text(GTK_LABEL(LKP_PREF(WDG_BITRATE)), rate);
 }
 
-static void on_mp3_quality_changed(GtkComboBox * combobox, gpointer user_data)
+static void on_vbr_toggled(GtkToggleButton *togglebutton, gpointer user_data)
 {
-	char bitrate[8];
-	gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (combobox));
-	bool vbr = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(LKP_PREF("mp3_vbr")));
-	snprintf(bitrate, 8, _("%d Kbps"), mp3_quality_to_bitrate(index, vbr));
-	gtk_label_set_text(GTK_LABEL(LKP_PREF("bitrate_lbl_2")), bitrate);
-
-	// gint index = gtk_combo_box_get_active (GTK_COMBO_BOX (combobox));
-	// printf("SELECTED INDEX=[%d]\n", index);
-
-	gchar * p_text = gtk_combo_box_get_active_text (GTK_COMBO_BOX (combobox));
-	// printf("TEXT=[%s]\n", p_text);
-	g_free(p_text);
+	adjust_mp3_vbr();
+}
+static void on_mp3_quality_changed(GtkComboBox *combobox, gpointer user_data)
+{
+	adjust_mp3_vbr();
 }
 
-static void on_pick_disc_changed(GtkComboBox * combobox, gpointer user_data)
+static void set_pref_text(char *widget_name, char *text)
 {
-	cddb_disc_t *disc = g_list_nth_data(global_data->disc_matches, gtk_combo_box_get_active(combobox));
+	if(!text) {
+		g_warning("[set_pref_text] Text is NULL for '%s'\n", widget_name);
+		return;
+	}
+	gtk_entry_set_text(GTK_ENTRY(LKP_PREF(widget_name)), text);
+}
+
+static void on_s_drive_changed(GtkComboBox *combo, gpointer user_data)
+{
+	GtkTreeModel *m = gtk_combo_box_get_model(combo);
+	GtkTreeIter iter;
+	if(gtk_combo_box_get_active_iter(combo, &iter)) {
+		gchar *device = NULL;
+		gchar *model = NULL;
+		gtk_tree_model_get(m, &iter, 0, &device, 1, &model, -1);
+		// printf("TREE : device = %s, model = %s\n", device, model);
+		if(strcmp(device,"MANUAL")==0) {
+			gtk_widget_set_sensitive(LKP_PREF("cdrom"),TRUE);
+			set_pref_text("cdrom", g_prefs->tmp_cdrom);
+		} else if(strcmp(device,"DEFAULT")==0) {
+			set_pref_text("cdrom", "/dev/cdrom");
+			gtk_widget_set_sensitive(LKP_PREF("cdrom"),FALSE);
+		} else if(strcmp(device,"AUTO")==0) {
+			set_pref_text("cdrom", "/dev/*");
+			gtk_widget_set_sensitive(LKP_PREF("cdrom"),FALSE);
+		} else {
+			set_pref_text("cdrom", device);
+			gtk_widget_set_sensitive(LKP_PREF("cdrom"),FALSE);
+		}
+		g_free(device);
+		g_free(model);
+	} else {
+		TRACEWARN("no active item.");
+	}
+}
+
+static void on_pick_disc_changed(GtkComboBox *combobox, gpointer user_data)
+{
+	cddb_disc_t *disc = g_list_nth_data(g_data->disc_matches,
+										gtk_combo_box_get_active(combobox));
 	update_tracklist(disc);
 }
 
-static void on_preferences_clicked(GtkToolButton * toolbutton, gpointer user_data)
+static void on_preferences_clicked(GtkToolButton *button, gpointer user_data)
 {
-	win_prefs = create_prefs();
 	gtk_widget_show(win_prefs);
 }
 
-static void on_prefs_response(GtkDialog * dialog, gint response_id, gpointer user_data)
+static void on_prefs_response(GtkDialog *dialog, gint response, gpointer data)
 {
-	if (response_id == GTK_RESPONSE_OK) {
+	if (response == GTK_RESPONSE_OK) {
 		if (!prefs_are_valid()) return;
-
-		get_prefs_from_widgets(global_prefs);
-		save_prefs(global_prefs);
+		get_prefs_from_widgets(g_prefs);
+		save_prefs(g_prefs);
 	}
-	gtk_widget_destroy(GTK_WIDGET(dialog));
+	gtk_widget_hide(GTK_WIDGET(dialog));
 }
 
-static void on_prefs_show(GtkWidget * widget, gpointer user_data)
+static void on_prefs_show(GtkWidget *widget, gpointer user_data)
 {
-	set_widgets_from_prefs(global_prefs);
+	set_widgets_from_prefs(g_prefs);
 }
 
 static void on_press_f2(void)
 {
-	GtkWidget *treeView = LKP_MAIN(WDG_TRACKLIST);
-	if (!GTK_WIDGET_HAS_FOCUS(treeView)) return;
-
+	GtkWidget *tracklist = LKP_MAIN(WDG_TRACKLIST);
+	if (!GTK_WIDGET_HAS_FOCUS(tracklist)) return;
+	GtkTreeView *treeView = GTK_TREE_VIEW(tracklist);
 	GtkTreePath *treePath;
 	GtkTreeViewColumn *focusColumn;
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(treeView), &treePath, &focusColumn);
-	if (treePath == NULL || focusColumn == NULL)
-		return;
-
-	gtk_tree_view_set_cursor(GTK_TREE_VIEW(treeView), treePath, focusColumn, TRUE);
+	gtk_tree_view_get_cursor(treeView, &treePath, &focusColumn);
+	if (treePath == NULL || focusColumn == NULL) return;
+	gtk_tree_view_set_cursor(treeView, treePath, focusColumn, TRUE);
 }
 
-static void on_lookup_clicked(GtkToolButton * toolbutton, gpointer user_data)
+static void on_lookup_clicked(GtkToolButton *button, gpointer user_data)
 {
 	gdk_threads_leave();
-	refresh(global_prefs->cdrom, 1);
+	refresh(1);
 	gdk_threads_enter();
 }
 
@@ -1298,27 +1624,29 @@ static bool lookup_cdparanoia()
 	return false;
 }
 
-static void on_rip_button_clicked(GtkButton * button, gpointer user_data)
+static void on_rip_button_clicked(GtkButton *button, gpointer user_data)
 {
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
+	GtkListStore *store = get_tracklist_store();
 	if (store == NULL) {
-		DIALOG_ERROR_OK(_("No CD is inserted. Please insert a CD into the CD-ROM drive."));
+		DIALOG_ERROR_OK(_("No CD is inserted."
+							" Please insert a CD into the CD-ROM drive."));
 		return;
 	}
 	if(!lookup_cdparanoia()) return;
 	dorip();
 }
 
-static void on_rip_mp3_toggled(GtkToggleButton * button, gpointer user_data)
+static void on_rip_mp3_toggled(GtkToggleButton *button, gpointer user_data)
 {
 	if (gtk_toggle_button_get_active(button) && !program_exists(LAME_PRG)) {
 		DIALOG_ERROR_OK(_("The '%s' program was not found in your 'PATH'."
-						" %s requires that program in order to create MP3 files. All MP3 functionality is disabled."
-						" You should install '%s' on this computer if you want to convert audio tracks to MP3."),
-						LAME_PRG, PROGRAM_NAME, LAME_PRG);
+			" %s requires that program in order to create MP3 files. All MP3"
+			" functionality is disabled."
+			" You should install '%s' on this computer if you want to convert"
+			" audio tracks to MP3."), LAME_PRG, PROGRAM_NAME, LAME_PRG);
 
-		global_prefs->rip_mp3 = 0;
-		gtk_toggle_button_set_active(button, global_prefs->rip_mp3);
+		g_prefs->rip_mp3 = 0;
+		gtk_toggle_button_set_active(button, g_prefs->rip_mp3);
 	}
 	if (!gtk_toggle_button_get_active(button))
 		disable_mp3_widgets();
@@ -1326,99 +1654,111 @@ static void on_rip_mp3_toggled(GtkToggleButton * button, gpointer user_data)
 		enable_mp3_widgets();
 }
 
-static void on_rip_toggled(GtkCellRendererToggle * cell, gchar * path_string, gpointer user_data)
+static void on_rip_toggled(GtkCellRendererToggle *cell, gchar *path,
+														gpointer user_data)
 {
-	log_gen(__func__, LOG_INFO, "on_rip_toggled !");
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
+	GtkListStore *store = get_tracklist_store();
 	GtkTreeIter iter;
-	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path_string);
+	GtkTreeModel *tree_store = GTK_TREE_MODEL(store);
+	gtk_tree_model_get_iter_from_string(tree_store, &iter, path);
 	int toggled;
-	gtk_tree_model_get(GTK_TREE_MODEL(store), &iter, COL_RIPTRACK, &toggled, -1);
+	gtk_tree_model_get(tree_store, &iter, COL_RIPTRACK, &toggled, -1);
 	gtk_list_store_set(store, &iter, COL_RIPTRACK, !toggled, -1);
 }
 
-static void on_select_all_click(GtkMenuItem * menuitem, gpointer data)
+static void on_select_all_click(GtkMenuItem *menuitem, gpointer data)
 {
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST)));
+	GtkTreeModel *model = gtk_tree_view_get_model(LKP_TRACKLIST);
 	gtk_tree_model_foreach(model, for_each_row_select, NULL);
 }
 
-static void on_single_artist_toggled(GtkToggleButton * togglebutton, gpointer user_data)
+static void toggle_column(GtkToggleButton *btn, int column)
 {
-	GtkTreeViewColumn *col = gtk_tree_view_get_column(GTK_TREE_VIEW(LKP_MAIN("tracklist")), COL_TRACKARTIST);	//lnr
-	gtk_tree_view_column_set_visible(col, !gtk_toggle_button_get_active(togglebutton));
+	GtkTreeViewColumn *c = gtk_tree_view_get_column(LKP_TRACKLIST, column);
+	gtk_tree_view_column_set_visible(c, !gtk_toggle_button_get_active(btn));
 }
 
-static void on_single_genre_toggled(GtkToggleButton * togglebutton, gpointer user_data)
+static void on_single_artist_toggled(GtkToggleButton *btn, gpointer user_data)
 {
-	GtkTreeViewColumn *col = gtk_tree_view_get_column(GTK_TREE_VIEW(LKP_MAIN("tracklist")), COL_GENRE);
-	gtk_tree_view_column_set_visible(col, !gtk_toggle_button_get_active(togglebutton));
+	toggle_column(btn, COL_TRACKARTIST);
 }
 
-static void on_title_edited(GtkCellRendererText * cell, gchar * path_string, gchar * new_text, gpointer user_data)
+static void on_single_genre_toggled(GtkToggleButton *btn, gpointer user_data)
 {
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
+	toggle_column(btn, COL_GENRE);
+}
+
+static void on_title_edited(GtkCellRendererText *cell, gchar *path,
+								gchar *new_text, gpointer user_data)
+{
+	GtkListStore *store = get_tracklist_store();
 	SANITIZE(new_text);
 	GtkTreeIter iter;
-	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path_string);
+	gtk_tree_model_get_iter_from_string(GTK_TREE_MODEL(store), &iter, path);
 	if (new_text[0] == '\0')
 		gtk_list_store_set(store, &iter, COL_TRACKTITLE, STR_UNKNOWN, -1);
 	else
 		gtk_list_store_set(store, &iter, COL_TRACKTITLE, new_text, -1);
 }
 
-static gboolean on_ripcol_clicked(GtkWidget * treeView, GdkEventButton * event, gpointer user_data)
+static gboolean on_ripcol_clicked(GtkWidget *treeView,
+								GdkEventButton *event, gpointer user_data)
 {
-	if (!GTK_WIDGET_SENSITIVE(LKP_MAIN("rip_button"))) {
+	if (!GTK_WIDGET_SENSITIVE(LKP_MAIN(WDG_RIP))) {
 		return FALSE;
 	}
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST)));
+	GtkTreeModel *model = gtk_tree_view_get_model(LKP_TRACKLIST);
 	gtk_tree_model_foreach(model, for_each_row_deselect, NULL);
 	return TRUE;
 }
 
-static gboolean on_tracklist_mouse_click(GtkWidget * treeView, GdkEventButton * event, gpointer user_data)
+static gboolean on_tracklist_clicked(GtkWidget *treeView,
+								GdkEventButton *event, gpointer user_data)
 {
-	if (event->type != GDK_BUTTON_PRESS || event->button != 3 || !GTK_WIDGET_SENSITIVE(LKP_MAIN("rip_button"))) {
+	if (event->type != GDK_BUTTON_PRESS
+		|| event->button != 3
+		|| !GTK_WIDGET_SENSITIVE(LKP_MAIN(WDG_RIP))) {
 		return FALSE;
 	}
 	GtkWidget *menu = gtk_menu_new();
-	GtkWidget *menuItem = gtk_menu_item_new_with_label(_("Select all for ripping"));
-	g_signal_connect(menuItem, "activate", G_CALLBACK(on_select_all_click), NULL);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuItem);
+	GtkWidget *item = gtk_menu_item_new_with_label(_("Select all for ripping"));
+	CONNECT_SIGNAL(item, "activate", on_select_all_click);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 	gtk_widget_show_all(menu);
-	menuItem = gtk_menu_item_new_with_label(_("Deselect all for ripping"));
-	g_signal_connect(menuItem, "activate", G_CALLBACK(on_deselect_all_click), NULL);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuItem);
+	item = gtk_menu_item_new_with_label(_("Deselect all for ripping"));
+	CONNECT_SIGNAL(item, "activate", on_deselect_all_click);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 	gtk_widget_show_all(menu);
-	gtk_menu_popup(GTK_MENU(menu), NULL, NULL, NULL, NULL, event->button, gdk_event_get_time((GdkEvent *) event));
+	gtk_menu_popup(GTK_MENU(menu), NULL, NULL, NULL, NULL,
+					event->button, gdk_event_get_time((GdkEvent *) event));
 	/* no need for signal to propagate */
 	return TRUE;
 }
 
-static void on_window_close(GtkWidget * widget, GdkEventFocus * event, gpointer user_data)
+static void on_window_close(GtkWidget *widget, GdkEventFocus *event,
+													gpointer user_data)
 {
-	gtk_window_get_size(GTK_WINDOW(win_main), &global_prefs->main_window_width, &global_prefs->main_window_height);
-	save_prefs(global_prefs);
+	gtk_window_get_size(GTK_WINDOW(win_main),
+				&g_prefs->main_window_width, &g_prefs->main_window_height);
+	save_prefs(g_prefs);
 	gtk_main_quit();
 }
 
-static void read_completion_file(GtkListStore * list, const char *name)
+static void read_completion_file(GtkListStore *list, const char *name)
 {
 	gchar *file = get_config_path(name);
 	if(!file) {
-		log_gen(__func__, LOG_WARN, "Warning: could not get completion file path: %s", strerror(errno));
+		TRACEWARN("could not get completion file path: %s", strerror(errno));
 		return;
 	}
-	log_gen(__func__, LOG_INFO, "Reading completion data for %s in %s", name, file);
+	TRACEINFO("for %s in %s", name, file);
 	FILE *data = fopen(file, "r");
 	if (data == NULL) {
 		g_free(file);
 		return;
 	}
 	char buf[1024];
-	int i;
-	for (i = 0; i < COMPLETION_MAX; i++) {
+	for (int i = 0; i < COMPLETION_MAX; i++) {
 		char *ptr = fgets(buf, sizeof(buf), data);
 		if (ptr == NULL) break;
 		g_strstrip(buf);
@@ -1433,9 +1773,9 @@ static void read_completion_file(GtkListStore * list, const char *name)
 	g_free(file);
 }
 
-static void create_completion(GtkWidget * entry, const char *name)
+static void create_completion(GtkWidget *entry, const char *name)
 {
-	log_gen(__func__, LOG_INFO, "create_completion for %s", name);
+	TRACEINFO("create_completion for %s", name);
 	GtkListStore *list = gtk_list_store_new(1, G_TYPE_STRING);
 	GtkEntryCompletion *compl = gtk_entry_completion_new();
 	gtk_entry_completion_set_model(compl, GTK_TREE_MODEL(list));
@@ -1449,7 +1789,8 @@ static void create_completion(GtkWidget * entry, const char *name)
 	read_completion_file(list, name);
 }
 
-static gboolean save_history_cb(GtkTreeModel * model, GtkTreePath * path, GtkTreeIter * iter, gpointer data)
+static gboolean save_history_cb(GtkTreeModel *model, GtkTreePath *path,
+									GtkTreeIter *iter, gpointer data)
 {
 	char *str;
 	gtk_tree_model_get(model, iter, 0, &str, -1);
@@ -1461,7 +1802,7 @@ static gboolean save_history_cb(GtkTreeModel * model, GtkTreePath * path, GtkTre
 	return FALSE;
 }
 
-static GtkTreeModel *get_tree_model(GtkWidget * entry)
+static GtkTreeModel *get_tree_model(GtkWidget *entry)
 {
 	GtkEntryCompletion *compl = gtk_entry_get_completion(GTK_ENTRY(entry));
 	if (compl == NULL) return NULL;
@@ -1469,7 +1810,7 @@ static GtkTreeModel *get_tree_model(GtkWidget * entry)
 	return model;
 }
 
-static void save_completion(GtkWidget * entry)
+static void save_completion(GtkWidget *entry)
 {
 	GtkTreeModel *model = get_tree_model(entry);
 	if (model == NULL) return;
@@ -1479,10 +1820,10 @@ static void save_completion(GtkWidget * entry)
 
 	gchar *file = get_config_path(name);
 	if(!file) {
-		log_gen(__func__, LOG_WARN, "Warning: could not get completion file path: %s", strerror(errno));
+		TRACEWARN("could not get completion file path: %s", strerror(errno));
 		return;
 	}
-	log_gen(__func__, LOG_INFO, "Saving completion data for %s in %s", name, file);
+	TRACEINFO("Saving completion data for %s in %s", name, file);
 	FILE *fd = fopen(file, "w");
 	if (fd) {
 		gtk_tree_model_foreach(model, save_history_cb, fd);
@@ -1491,7 +1832,7 @@ static void save_completion(GtkWidget * entry)
 	g_free(file);
 }
 
-static void add_completion(GtkWidget * entry)
+static void add_completion(GtkWidget *entry)
 {
 	const char *str = gtk_entry_get_text(GTK_ENTRY(entry));
 	if (str == NULL || strlen(str) == 0) return;
@@ -1518,36 +1859,11 @@ static void add_completion(GtkWidget * entry)
 	gtk_list_store_set(GTK_LIST_STORE(model), &iter, 0, str, -1);
 }
 
-static GdkPixbuf *LoadMainIcon()
-{
-	GError* error = NULL;
-	GdkPixbuf* icon = NULL;
-	GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
-	gdk_pixbuf_loader_write(loader, pixmaps_irongrip_png, pixmaps_irongrip_png_len, &error);
-	if (error) {
-		g_warning ("Unable to load logo : %s\n", error->message);
-		g_error_free (error);
-		return NULL;
-	}
-	gdk_pixbuf_loader_close(loader,NULL);
-	icon = gdk_pixbuf_loader_get_pixbuf(loader);
-	return icon;
-}
-
 static void show_aboutbox(void)
 {
-	GdkPixbuf* icon = NULL;
-
 	gchar license[COPYING_len+1];
 	memcpy(license,COPYING,COPYING_len);
 	license[COPYING_len]= 0;
-
-
-	/*
-	gchar *license = PROGRAM_NAME
-					" is distributed under the GNU General Public Licence\n"
-					"version 2, please see COPYING file for the complete text.\n";
-					*/
 
 	gchar* authors[] = { AUTHOR,
 						"",
@@ -1558,7 +1874,9 @@ static void show_aboutbox(void)
 						"See file 'README.md' for details.",
 						NULL };
 
-	gchar* comments = N_("An application to save tracks from an Audio CD as WAV and/or MP3.");
+	gchar* comments = N_("An application to save tracks from an Audio CD"
+							" as WAV and/or MP3.");
+
 	gchar* copyright = {"Copyright 2005 Eric Lathrop (Asunder)\n"
 						"Copyright 2007 Andrew Smith (Asunder)\n"
 						"Copyright 2012 " AUTHOR};
@@ -1568,12 +1886,12 @@ static void show_aboutbox(void)
 	gchar* website = HOMEPAGE;
 	gchar* website_label = website;
 
-	icon = LoadMainIcon();
+	GdkPixbuf* icon = LoadMainIcon();
 	if (!icon) {
 		return;
 	}
 	gtk_show_about_dialog (
-			GTK_WINDOW(LKP_MAIN("main")),
+			GTK_WINDOW(LKP_MAIN(WDG_MAIN)),
 			"authors", authors,
 			// "artists", artists,
 			"comments", comments,
@@ -1590,7 +1908,7 @@ static void show_aboutbox(void)
 			NULL);
 }
 
-static void on_about_clicked(GtkToolButton * toolbutton, gpointer user_data)
+static void on_about_clicked(GtkToolButton *button, gpointer user_data)
 {
     show_aboutbox();
 }
@@ -1599,13 +1917,14 @@ static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(main_win), PROGRAM_NAME " v." VERSION);
-	gtk_window_set_default_size(GTK_WINDOW(main_win), global_prefs->main_window_width, global_prefs->main_window_height);
-	// GdkPixbuf *main_icon_pixbuf = gtk_icon_theme_load_icon ( gtk_icon_theme_get_default(), GTK_STOCK_CDROM, 32, 0, NULL);
-	GdkPixbuf *main_icon_pixbuf = LoadMainIcon();
-	if (main_icon_pixbuf) {
-		gtk_window_set_icon(GTK_WINDOW(main_win), main_icon_pixbuf);
-		g_object_unref(main_icon_pixbuf);
+	gtk_window_set_default_size(GTK_WINDOW(main_win),
+			g_prefs->main_window_width, g_prefs->main_window_height);
+	GdkPixbuf *main_icon = LoadMainIcon();
+	if (main_icon) {
+		gtk_window_set_icon(GTK_WINDOW(main_win), main_icon);
+		g_object_unref(main_icon);
 	}
+	gtk_window_set_position(GTK_WINDOW(main_win), GTK_WIN_POS_CENTER);
 
 	GtkWidget *vbox1 = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(vbox1);
@@ -1613,251 +1932,259 @@ static GtkWidget *create_main(void)
 
 	GtkWidget *toolbar = gtk_toolbar_new();
 	gtk_widget_show(toolbar);
-	gtk_box_pack_start(GTK_BOX(vbox1), toolbar, FALSE, FALSE, 0);
+	BOXPACK(vbox1, toolbar, FALSE, FALSE, 0);
 	gtk_toolbar_set_style(GTK_TOOLBAR(toolbar), GTK_TOOLBAR_BOTH_HORIZ);
 
-	GtkWidget *icon = gtk_image_new_from_stock(GTK_STOCK_REFRESH, gtk_toolbar_get_icon_size(GTK_TOOLBAR(toolbar)));
+	GtkIconSize icon_size = gtk_toolbar_get_icon_size(GTK_TOOLBAR(toolbar));
+	GtkWidget *icon = gtk_image_new_from_stock(GTK_STOCK_REFRESH, icon_size);
 	gtk_widget_show(icon);
-	GtkWidget *lookup = (GtkWidget *) gtk_tool_button_new(icon, _("CDDB Lookup"));
+	GtkWidget *lookup = (pWdg) gtk_tool_button_new(icon, _("CDDB Lookup"));
 	GtkTooltips *tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, lookup, _("Look up into the CDDB for information about this audio disc"), NULL);
+	gtk_tooltips_set_tip(tooltips, lookup,
+		_("Look up into the CDDB for information about this audio disc"), NULL);
 	gtk_widget_show(lookup);
 	gtk_container_add(GTK_CONTAINER(toolbar), lookup);
 	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(lookup), TRUE);
 
-	GtkWidget *preferences = (GtkWidget *) gtk_tool_button_new_from_stock("gtk-preferences");
-	gtk_widget_show(preferences);
-	gtk_container_add(GTK_CONTAINER(toolbar), preferences);
-	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(preferences), TRUE);
+	GtkWidget *pref= (pWdg) gtk_tool_button_new_from_stock(GTK_STOCK_PREFERENCES);
+	gtk_widget_show(pref);
+	gtk_container_add(GTK_CONTAINER(toolbar), pref);
+	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(pref), TRUE);
 
-	GtkWidget *separator1 = (GtkWidget *) gtk_separator_tool_item_new();
-	gtk_widget_show(separator1);
-	gtk_container_add(GTK_CONTAINER(toolbar), separator1);
+	GtkWidget *sep = (pWdg) gtk_separator_tool_item_new();
+	gtk_widget_show(sep);
+	gtk_container_add(GTK_CONTAINER(toolbar), sep);
 
-	GtkWidget *rip_icon = gtk_image_new_from_stock("gtk-cdrom", GTK_ICON_SIZE_BUTTON);
+	GtkWidget *rip_icon = gtk_image_new_from_stock(GTK_STOCK_CDROM, icon_size);
 	gtk_widget_show(rip_icon);
-	GtkWidget *rip_button = (GtkWidget *) gtk_tool_button_new(rip_icon, _("Rip"));
+	GtkWidget *rip_button = (pWdg) gtk_tool_button_new(rip_icon, _("Rip"));
 	gtk_widget_show(rip_button);
-	gtk_container_add(GTK_CONTAINER(toolbar), (GtkWidget *) rip_button);
+	gtk_container_add(GTK_CONTAINER(toolbar), (pWdg) rip_button);
 	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(rip_button), TRUE);
 	// disable the "rip" button
-	// it will be enabled when check_disc() finds a disc in the drive
+	// it will be enabled when a disc is found in the drive
 	gtk_widget_set_sensitive(rip_button, FALSE);
 
-	GtkWidget *separator2 = (GtkWidget *) gtk_separator_tool_item_new();
-	gtk_tool_item_set_expand (GTK_TOOL_ITEM(separator2), TRUE);
-	gtk_separator_tool_item_set_draw((GtkSeparatorToolItem *)separator2, FALSE);
-	gtk_widget_show(separator2);
-	gtk_container_add(GTK_CONTAINER(toolbar), separator2);
+	sep= (pWdg) gtk_separator_tool_item_new();
+	gtk_tool_item_set_expand (GTK_TOOL_ITEM(sep), TRUE);
+	gtk_separator_tool_item_set_draw((GtkSeparatorToolItem *)sep, FALSE);
+	gtk_widget_show(sep);
+	gtk_container_add(GTK_CONTAINER(toolbar), sep);
 
-	GtkWidget *about = (GtkWidget *) gtk_tool_button_new_from_stock("gtk-about");
+	GtkWidget *about = (pWdg) gtk_tool_button_new_from_stock(GTK_STOCK_ABOUT);
 	gtk_widget_show(about);
 	gtk_container_add(GTK_CONTAINER(toolbar), about);
 	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(about), TRUE);
 
-	GtkWidget *table2 = gtk_table_new(3, 3, FALSE);
-	gtk_widget_show(table2);
-	gtk_box_pack_start(GTK_BOX(vbox1), table2, FALSE, TRUE, 3);
+	GtkWidget *table = gtk_table_new(3, 3, FALSE);
+	gtk_widget_show(table);
+	BOXPACK(vbox1, table, FALSE, TRUE, 3);
 
 	GtkWidget *album_artist = gtk_entry_new();
 	create_completion(album_artist, WDG_ALBUM_ARTIST);
 	gtk_widget_show(album_artist);
-	gtk_table_attach(GTK_TABLE(table2), album_artist, 1, 2, 1, 2, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+
+	GtkTable *tbl = GTK_TABLE(table);
+	gtk_table_attach(tbl, album_artist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
 
 	GtkWidget *album_title = gtk_entry_new();
 	gtk_widget_show(album_title);
 	create_completion(album_title, WDG_ALBUM_TITLE);
-	gtk_table_attach(GTK_TABLE(table2), album_title, 1, 2, 2, 3, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+	gtk_table_attach(tbl, album_title, 1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
 
 	GtkWidget *pick_disc = gtk_combo_box_new();
-	gtk_table_attach(GTK_TABLE(table2), pick_disc, 1, 2, 0, 1, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (GTK_FILL), 0, 0);
+	gtk_table_attach(tbl, pick_disc, 1, 2, 0, 1, GTK_FILL, GTK_FILL, 0, 0);
 
 	GtkWidget *album_genre = gtk_entry_new();
 	create_completion(album_genre, WDG_ALBUM_GENRE);
 	gtk_widget_show(album_genre);
-	gtk_table_attach(GTK_TABLE(table2), album_genre, 1, 2, 3, 4, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+	gtk_table_attach(tbl, album_genre, 1, 2, 3, 4, GTK_EXPAND_FILL, 0, 0, 0);
 
 	GtkWidget *disc = gtk_label_new(_("Disc:"));
-	gtk_table_attach(GTK_TABLE(table2), disc, 0, 1, 0, 1, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 3, 0);
+	gtk_table_attach(tbl, disc, 0, 1, 0, 1, GTK_FILL, 0, 3, 0);
 	gtk_misc_set_alignment(GTK_MISC(disc), 0, 0.49);
 
 	GtkWidget *artist_label = gtk_label_new(_("Album Artist:"));
 	gtk_misc_set_alignment(GTK_MISC(artist_label), 0, 0);
 	gtk_widget_show(artist_label);
-	gtk_table_attach(GTK_TABLE(table2), artist_label, 0, 1, 1, 2, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 3, 0);
+	gtk_table_attach(tbl, artist_label, 0, 1, 1, 2, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *title_label = gtk_label_new(_("Album Title:"));
-	gtk_misc_set_alignment(GTK_MISC(title_label), 0, 0);
-	gtk_widget_show(title_label);
-	gtk_table_attach(GTK_TABLE(table2), title_label, 0, 1, 2, 3, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 3, 0);
+	GtkWidget *albumtitle_label = gtk_label_new(_("Album Title:"));
+	gtk_misc_set_alignment(GTK_MISC(albumtitle_label), 0, 0);
+	gtk_widget_show(albumtitle_label);
+	gtk_table_attach(tbl, albumtitle_label, 0, 1, 2, 3, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *single_artist = gtk_check_button_new_with_mnemonic(_("Single Artist"));
+	GtkWidget *single_artist = gtk_check_button_new_with_mnemonic(
+														_("Single Artist"));
 	gtk_widget_show(single_artist);
-	gtk_table_attach(GTK_TABLE(table2), single_artist, 2, 3, 1, 2, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 3, 0);
+	gtk_table_attach(tbl, single_artist, 2, 3, 1, 2, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *genre_label = gtk_label_new(_("Genre / Year:"));
 	gtk_misc_set_alignment(GTK_MISC(genre_label), 0, 0);
 	gtk_widget_show(genre_label);
-	gtk_table_attach(GTK_TABLE(table2), genre_label, 0, 1, 3, 4, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 3, 0);
+	gtk_table_attach(tbl, genre_label, 0, 1, 3, 4, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *single_genre = gtk_check_button_new_with_mnemonic(_("Single Genre"));
-	//~ gtk_widget_show( single_genre );
-	//~ gtk_table_attach( GTK_TABLE( table2 ), single_genre, 2, 3, 3, 4,
-	//~ (GtkAttachOptions) ( GTK_FILL ),
-	//~ (GtkAttachOptions) (0), 3, 0);
+	GtkWidget *single_genre = gtk_check_button_new_with_mnemonic(
+														_("Single Genre"));
+	//~ gtk_widget_show(single_genre);
+	//~ gtk_table_attach(GTK_TABLE(table2), single_genre, 2, 3, 3, 4,
+	//~  GTK_FILL, 0, 3, 0);
 
 	GtkWidget *album_year = gtk_entry_new();
 	gtk_widget_show(album_year);
-	gtk_table_attach(GTK_TABLE(table2), album_year, 2, 3, 3, 4, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 3, 0);
+	gtk_table_attach(tbl, album_year, 2, 3, 3, 4, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
 	gtk_widget_show(scroll);
-	gtk_box_pack_start(GTK_BOX(vbox1), scroll, TRUE, TRUE, 0);
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-
+	BOXPACK(vbox1, scroll, TRUE, TRUE, 0);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+								GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 	GtkWidget *tracklist = gtk_tree_view_new();
+	GtkTreeView *tracktree = GTK_TREE_VIEW(tracklist);
 	gtk_widget_show(tracklist);
 	gtk_container_add(GTK_CONTAINER(scroll), tracklist);
-	gtk_tree_view_set_rules_hint(GTK_TREE_VIEW(tracklist), TRUE);
-	gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tracklist), FALSE);
+	gtk_tree_view_set_rules_hint(tracktree, TRUE);
+	gtk_tree_view_set_enable_search(tracktree, FALSE);
 
 	GtkWidget *rip_box = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(rip_box);
 	gtk_container_set_border_width(GTK_CONTAINER(rip_box), 0);
-	GtkWidget *table = gtk_table_new(3, 2, FALSE);
+	table = gtk_table_new(3, 2, FALSE);
 	gtk_widget_show(table);
-	gtk_box_pack_start(GTK_BOX(rip_box), table, FALSE, FALSE, 0);
+	BOXPACK(rip_box, table, FALSE, FALSE, 0);
 	GtkWidget *progress_total = ripping_bar(table,"Total progress", 0);
 	GtkWidget *progress_rip = ripping_bar(table,"Ripping", 1);
 	GtkWidget *progress_encode = ripping_bar(table,"Encoding", 2);
 
-	GtkWidget *cancel = gtk_button_new_from_stock("gtk-cancel");
+	GtkWidget *cancel = gtk_button_new_from_stock(GTK_STOCK_CANCEL);
 	gtk_widget_show(cancel);
 	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
 	GtkWidget *alignment_cancel= gtk_alignment_new(0.5, 0.5, 0.4, 1);
 	gtk_widget_show(alignment_cancel);
 	gtk_container_add(GTK_CONTAINER(alignment_cancel), cancel);
-	gtk_box_pack_start(GTK_BOX(rip_box), alignment_cancel, FALSE, FALSE, 8);
-	g_signal_connect((gpointer) cancel, "clicked", G_CALLBACK(on_cancel_clicked), NULL);
+	BOXPACK(rip_box, alignment_cancel, FALSE, FALSE, 8);
+	CONNECT_SIGNAL(cancel, "clicked", on_cancel_clicked);
 
 	GtkWidget *win_ripping = gtk_frame_new(NULL);
 	gtk_container_set_border_width(GTK_CONTAINER(win_ripping), 8);
 	gtk_frame_set_label(GTK_FRAME(win_ripping), "Progress");
 	gtk_container_add(GTK_CONTAINER(win_ripping), rip_box);
-	gtk_box_pack_start(GTK_BOX(vbox1), win_ripping, TRUE, TRUE, 0);
+	BOXPACK(vbox1, win_ripping, TRUE, TRUE, 0);
 
-	// TRackList
-	// set up all the columns for the track listing widget
+	// Set up all the columns for the track listing widget
+#define TRACK_INSERT(text,type,column) \
+	gtk_tree_view_insert_column_with_attributes(\
+			GTK_TREE_VIEW(tracklist), -1, text, cell, type, column, NULL)
+
 	GtkCellRenderer *cell = NULL;
 	cell = gtk_cell_renderer_toggle_new();
 	g_object_set(cell, "activatable", TRUE, NULL);
-	g_signal_connect(cell, "toggled", (GCallback) on_rip_toggled, NULL);
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tracklist), -1, _("Rip"), cell, "active", COL_RIPTRACK, NULL);
-	GtkTreeViewColumn *col = gtk_tree_view_get_column(GTK_TREE_VIEW(tracklist), COL_RIPTRACK);
+	CONNECT_SIGNAL(cell, "toggled", on_rip_toggled);
+	TRACK_INSERT(_("Rip"), "active", COL_RIPTRACK);
+	GtkTreeViewColumn *col = gtk_tree_view_get_column(tracktree, COL_RIPTRACK);
 	gtk_tree_view_column_set_clickable(col, TRUE);
 
 	cell = gtk_cell_renderer_text_new();
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tracklist), -1, _("Track"), cell, STR_TEXT, COL_TRACKNUM, NULL);
+	TRACK_INSERT(_("Track"), STR_TEXT, COL_TRACKNUM);
 
 	cell = gtk_cell_renderer_text_new();
 	g_object_set(cell, "editable", TRUE, NULL);
-	g_signal_connect(cell, "edited", (GCallback) on_artist_edited, NULL);
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tracklist), -1, _("Artist"), cell, STR_TEXT, COL_TRACKARTIST, NULL);
+	CONNECT_SIGNAL(cell, "edited", on_artist_edited);
+	TRACK_INSERT(_("Artist"), STR_TEXT, COL_TRACKARTIST);
 
 	cell = gtk_cell_renderer_text_new();
 	g_object_set(cell, "editable", TRUE, NULL);
-	g_signal_connect(cell, "edited", (GCallback) on_title_edited, NULL);
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tracklist), -1, _("Title"), cell, STR_TEXT, COL_TRACKTITLE, NULL);
+	CONNECT_SIGNAL(cell, "edited", on_title_edited);
+	TRACK_INSERT(_("Title"), STR_TEXT, COL_TRACKTITLE);
 
 	cell = gtk_cell_renderer_text_new();
 	g_object_set(cell, "editable", TRUE, NULL);
-	g_signal_connect(cell, "edited", (GCallback) on_genre_edited, NULL);
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tracklist), -1, _("Genre"), cell, STR_TEXT, COL_GENRE, NULL);
+	CONNECT_SIGNAL(cell, "edited", on_genre_edited);
+	TRACK_INSERT(_("Genre"), STR_TEXT, COL_GENRE);
 
 	cell = gtk_cell_renderer_text_new();
-	gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tracklist), -1, _("Time"), cell, STR_TEXT, COL_TRACKTIME, NULL);
+	TRACK_INSERT(_("Time"), STR_TEXT, COL_TRACKTIME);
 
 	// set up the columns for the album selecting dropdown box
 	cell = gtk_cell_renderer_text_new();
-	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(pick_disc), cell, TRUE);
-	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(pick_disc), cell, STR_TEXT, 0, NULL);
+	GtkCellLayout *disc_layout = GTK_CELL_LAYOUT(pick_disc);
+	gtk_cell_layout_pack_start(disc_layout, cell, TRUE);
+	gtk_cell_layout_set_attributes(disc_layout, cell, STR_TEXT, 0, NULL);
 	cell = gtk_cell_renderer_text_new();
-	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(pick_disc), cell, TRUE);
-	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(pick_disc), cell, STR_TEXT, 1, NULL);
+	gtk_cell_layout_pack_start(disc_layout, cell, TRUE);
+	gtk_cell_layout_set_attributes(disc_layout, cell, STR_TEXT, 1, NULL);
 
 	// Bottom HBOX
 	GtkWidget *hbox5 = gtk_hbox_new(FALSE, 5);
-	gtk_box_pack_start(GTK_BOX(vbox1), hbox5, FALSE, TRUE, 5);
+	BOXPACK(vbox1, hbox5, FALSE, TRUE, 5);
 	gtk_widget_show(hbox5);
 
 	GtkWidget *statusLbl = gtk_label_new("Welcome to " PROGRAM_NAME);
 	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
 	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
-	gtk_box_pack_start(GTK_BOX(hbox5), statusLbl, TRUE, TRUE, 0);
+	BOXPACK(hbox5, statusLbl, TRUE, TRUE, 0);
 	gtk_widget_show(statusLbl);
 
-	g_signal_connect((gpointer) main_win, "delete_event", G_CALLBACK(on_window_close), NULL);
-	g_signal_connect((gpointer) tracklist, "button-press-event", G_CALLBACK(on_tracklist_mouse_click), NULL);
-	g_signal_connect((gpointer) col, "clicked", G_CALLBACK(on_ripcol_clicked), NULL);
-	g_signal_connect((gpointer) lookup, "clicked", G_CALLBACK(on_lookup_clicked), NULL);
-	g_signal_connect((gpointer) preferences, "clicked", G_CALLBACK(on_preferences_clicked), NULL);
-	g_signal_connect((gpointer) about, "clicked", G_CALLBACK(on_about_clicked), NULL);
-	g_signal_connect((gpointer) album_artist, "focus_out_event", G_CALLBACK(on_album_artist_focus_out_event), NULL);
-	g_signal_connect((gpointer) album_title, "focus_out_event", G_CALLBACK(on_album_title_focus_out_event), NULL);
-	g_signal_connect((gpointer) pick_disc, "changed", G_CALLBACK(on_pick_disc_changed), NULL);
-	g_signal_connect((gpointer) single_artist, "toggled", G_CALLBACK(on_single_artist_toggled), NULL);
-	g_signal_connect((gpointer) rip_button, "clicked", G_CALLBACK(on_rip_button_clicked), NULL);
-	g_signal_connect((gpointer) album_genre, "focus_out_event", G_CALLBACK(on_album_genre_focus_out_event), NULL);
-	g_signal_connect((gpointer) single_genre, "toggled", G_CALLBACK(on_single_genre_toggled), NULL);
-	g_signal_connect((gpointer) album_year, "focus_out_event", G_CALLBACK(on_year_focus_out_event), NULL);
+	CONNECT_SIGNAL(main_win, "delete_event", on_window_close);
+	CONNECT_SIGNAL(tracklist, "button-press-event", on_tracklist_clicked);
+	CONNECT_SIGNAL(col, "clicked", on_ripcol_clicked);
+	CONNECT_SIGNAL(lookup, "clicked", on_lookup_clicked);
+	CONNECT_SIGNAL(pref, "clicked", on_preferences_clicked);
+	CONNECT_SIGNAL(about, "clicked", on_about_clicked);
+	CONNECT_SIGNAL(album_artist, "focus_out_event", on_album_artist_focus_out);
+	CONNECT_SIGNAL(album_title, "focus_out_event", on_album_title_focus_out);
+	CONNECT_SIGNAL(pick_disc, "changed", on_pick_disc_changed);
+	CONNECT_SIGNAL(single_artist, "toggled", on_single_artist_toggled);
+	CONNECT_SIGNAL(rip_button, "clicked", on_rip_button_clicked);
+	CONNECT_SIGNAL(album_genre, "focus_out_event", on_album_genre_focus_out);
+	CONNECT_SIGNAL(single_genre, "toggled", on_single_genre_toggled);
+	CONNECT_SIGNAL(album_year, "focus_out_event", on_year_focus_out);
 
 	/* KEYBOARD accelerators */
-	GtkAccelGroup *accelGroup;
-	guint accelKey;
-	GdkModifierType accelModifier;
+	GtkAccelGroup *group = gtk_accel_group_new();
+	gtk_window_add_accel_group(GTK_WINDOW(main_win), group);
+
+	guint key;
+	GdkModifierType modifier;
 	GClosure *closure = NULL;
 
-	accelGroup = gtk_accel_group_new();
-	gtk_window_add_accel_group(GTK_WINDOW(main_win), accelGroup);
-
-	gtk_accelerator_parse("<Control>W", &accelKey, &accelModifier);
+	gtk_accelerator_parse("<Control>W", &key, &modifier);
 	closure = g_cclosure_new(G_CALLBACK(on_window_close), NULL, NULL);
-	gtk_accel_group_connect(accelGroup, accelKey, accelModifier, GTK_ACCEL_VISIBLE, closure);
+	gtk_accel_group_connect(group, key, modifier, GTK_ACCEL_VISIBLE, closure);
 
-	gtk_accelerator_parse("<Control>Q", &accelKey, &accelModifier);
+	gtk_accelerator_parse("<Control>Q", &key, &modifier);
 	closure = g_cclosure_new(G_CALLBACK(on_window_close), NULL, NULL);
-	gtk_accel_group_connect(accelGroup, accelKey, accelModifier, GTK_ACCEL_VISIBLE, closure);
+	gtk_accel_group_connect(group, key, modifier, GTK_ACCEL_VISIBLE, closure);
 
-	gtk_accelerator_parse("F2", &accelKey, &accelModifier);
+	gtk_accelerator_parse("F2", &key, &modifier);
 	closure = g_cclosure_new(G_CALLBACK(on_press_f2), NULL, NULL);
-	gtk_accel_group_connect(accelGroup, accelKey, accelModifier, GTK_ACCEL_VISIBLE, closure);
+	gtk_accel_group_connect(group, key, modifier, GTK_ACCEL_VISIBLE, closure);
 	/* END KEYBOARD accelerators */
 
 	/* Store pointers to all widgets, for use by lookup_widget(). */
-	HOOKUP(main_win, about, "about");
+	HOOKUP(main_win, about, WDG_ABOUT);
+	HOOKUP(main_win, artist_label, WDG_LBL_ARTIST);
+	HOOKUP(main_win, albumtitle_label, WDG_LBL_ALBUMTITLE);
+	HOOKUP(main_win, genre_label, WDG_LBL_GENRE);
 	HOOKUP(main_win, album_artist, WDG_ALBUM_ARTIST);
 	HOOKUP(main_win, album_genre, WDG_ALBUM_GENRE);
 	HOOKUP(main_win, album_title, WDG_ALBUM_TITLE);
 	HOOKUP(main_win, album_year, WDG_ALBUM_YEAR);
-	HOOKUP(main_win, artist_label, "artist_label");
-	HOOKUP(main_win, disc, "disc");
-	HOOKUP(main_win, genre_label, "genre_label");
-	HOOKUP(main_win, lookup, "lookup");
+	HOOKUP(main_win, disc, WDG_DISC);
+	HOOKUP(main_win, lookup, WDG_CDDB);
 	HOOKUP(main_win, pick_disc, WDG_PICK_DISC);
-	HOOKUP(main_win, preferences, "preferences");
-	HOOKUP(main_win, rip_button, "rip_button");
-	HOOKUP(main_win, single_artist, "single_artist");
-	HOOKUP(main_win, single_genre, "single_genre");
-	HOOKUP(main_win, statusLbl, "statusLbl");
-	HOOKUP(main_win, title_label, "title_label");
+	HOOKUP(main_win, pref, WDG_PREFS);
+	HOOKUP(main_win, rip_button, WDG_RIP);
+	HOOKUP(main_win, single_artist, WDG_SINGLE_ARTIST);
+	HOOKUP(main_win, single_genre, WDG_SINGLE_GENRE);
+	HOOKUP(main_win, statusLbl, WDG_STATUS);
 	HOOKUP(main_win, tracklist, WDG_TRACKLIST);
-	HOOKUP(main_win, scroll, "scroll");
-	HOOKUP(main_win, progress_total, "progress_total");
-	HOOKUP(main_win, progress_rip, "progress_rip");
-	HOOKUP(main_win, progress_encode, "progress_encode");
-	HOOKUP(main_win, cancel, "cancel");
-	HOOKUP(main_win, win_ripping, "win_ripping");
-	HOOKUP_OBJ_NOREF(main_win, main_win, "main");
+	HOOKUP(main_win, scroll, WDG_SCROLL);
+	HOOKUP(main_win, progress_total, WDG_PROGRESS_TOTAL);
+	HOOKUP(main_win, progress_rip, WDG_PROGRESS_RIP);
+	HOOKUP(main_win, progress_encode, WDG_PROGRESS_ENCODE);
+	HOOKUP(main_win, win_ripping, WDG_RIPPING);
+	HOOKUP_NOREF(main_win, main_win, WDG_MAIN);
 
 	return main_win;
 }
@@ -1874,8 +2201,9 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(vbox);
 
 	GtkWidget *notebook1 = gtk_notebook_new();
+	GtkNotebook *tabs = GTK_NOTEBOOK(notebook1);
 	gtk_widget_show(notebook1);
-	gtk_box_pack_start(GTK_BOX(vbox), notebook1, TRUE, TRUE, 0);
+	BOXPACK(vbox, notebook1, TRUE, TRUE, 0);
 
 	/* GENERAL tab */
 	vbox = gtk_vbox_new(FALSE, 5);
@@ -1886,39 +2214,65 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *label = gtk_label_new(_("Destination folder"));
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
+	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
-	GtkWidget *music_dir = gtk_file_chooser_button_new(_("Destination folder"), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
+	GtkWidget *music_dir = gtk_file_chooser_button_new(_("Destination folder"),
+										GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
 	gtk_widget_show(music_dir);
-	gtk_box_pack_start(GTK_BOX(vbox), music_dir, FALSE, FALSE, 0);
+	BOXPACK(vbox, music_dir, FALSE, FALSE, 0);
 
-	GtkWidget *make_playlist = gtk_check_button_new_with_mnemonic(_("Create M3U playlist"));
-	gtk_widget_show(make_playlist);
-	gtk_box_pack_start(GTK_BOX(vbox), make_playlist, FALSE, FALSE, 0);
+	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
+													_("Create M3U playlist"));
+	gtk_widget_show(make_m3u);
+	BOXPACK(vbox, make_m3u, FALSE, FALSE, 0);
 
-	GtkWidget *hbox12 = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox12);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox12, FALSE, FALSE, 0);
-
-	label = gtk_label_new(_("CD-ROM device: "));
+	/* CDROM drives */
+	GtkWidget *hbox = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hbox);
+	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
+	label = gtk_label_new(_("CD-ROM drives: "));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox12), label, FALSE, FALSE, 0);
+	BOXPACK(hbox, label, FALSE, FALSE, 0);
+
+	GtkWidget *cdrom_drives = gtk_combo_box_new();
+	gtk_widget_show(cdrom_drives);
+	BOXPACK(hbox, cdrom_drives, TRUE, TRUE, 0);
+
+	GtkCellRenderer *p_cell = gtk_cell_renderer_text_new();
+	GtkCellLayout *layout = GTK_CELL_LAYOUT(cdrom_drives);
+	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
+	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
+
+
+	// PATH TO DEVICE
+	hbox = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hbox);
+	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
+	label = gtk_label_new(_("Path to device: "));
+	gtk_widget_show(label);
+	BOXPACK(hbox, label, FALSE, FALSE, 0);
 
 	GtkWidget *cdrom = gtk_entry_new();
 	gtk_widget_show(cdrom);
-	gtk_box_pack_start(GTK_BOX(hbox12), cdrom, TRUE, TRUE, 0);
+	gtk_widget_set_sensitive(cdrom, FALSE);
+	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
+	GtkTooltips *tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, cdrom, _("Default: /dev/cdrom\n"
+			"Other example: /dev/hdc\n" "Other example: /dev/sr0"), NULL);
+	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
 
-	GtkTooltips *tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, cdrom, _("Default: /dev/cdrom\n" "Other example: /dev/hdc\n" "Other example: /dev/sr0"), NULL);
+	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
+	/* END of CDROM drives */
 
-	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(_("Eject disc when finished"));
+	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(
+											_("Eject disc when finished"));
 	gtk_widget_show(eject_on_done);
-	gtk_box_pack_start(GTK_BOX(vbox), eject_on_done, FALSE, FALSE, 5);
+	BOXPACK(vbox, eject_on_done, FALSE, FALSE, 5);
 
 	label = gtk_label_new(_("General"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(GTK_NOTEBOOK(notebook1), gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook1), 0), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 0), label);
 	/* END GENERAL tab */
 
 	/* FILENAMES tab */
@@ -1927,23 +2281,26 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
-	GtkWidget *frame2 = gtk_frame_new(NULL);
-	gtk_widget_show(frame2);
-	gtk_box_pack_start(GTK_BOX(vbox), frame2, FALSE, FALSE, 0);
+	GtkWidget *frame = gtk_frame_new(NULL);
+	gtk_widget_show(frame);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
 
 	vbox = gtk_vbox_new(FALSE, 0);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
 	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(frame2), vbox);
+	gtk_container_add(GTK_CONTAINER(frame), vbox);
 
-	label = gtk_label_new(_ ("%A - Artist\n%L - Album\n%N - Track number (2-digit)\n%Y - Year (4-digit or \"0\")\n%T - Song title"));
+	label = gtk_label_new(_("%A - Artist\n" "%L - Album\n"
+							"%N - Track number (2-digit)\n"
+							"%Y - Year (4-digit or \"0\")\n"
+							"%T - Song title"));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
+	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 
 	label = gtk_label_new(_("%G - Genre"));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
+	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 
 	// problem is that the same albumdir is used (threads.c) for all formats
@@ -1953,51 +2310,59 @@ static GtkWidget *create_prefs(void)
 	//~ gtk_misc_set_alignment (GTK_MISC (label), 0, 0);
 
 	GtkWidget *table1 = gtk_table_new(3, 2, FALSE);
+	GtkTable *t = GTK_TABLE(table1);
 	gtk_widget_show(table1);
-	gtk_box_pack_start(GTK_BOX(vbox), table1, TRUE, TRUE, 0);
+	BOXPACK(vbox, table1, TRUE, TRUE, 0);
 
 	label = gtk_label_new(_("Album directory: "));
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table1), label, 0, 1, 0, 1, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+	gtk_table_attach(t, label, 0, 1, 0, 1, GTK_FILL, 0, 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 
 	label = gtk_label_new(_("Playlist file: "));
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table1), label, 0, 1, 1, 2, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+	gtk_table_attach(t, label, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 
 	label = gtk_label_new(_("Music file: "));
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table1), label, 0, 1, 2, 3, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+	gtk_table_attach(t, label, 0, 1, 2, 3, GTK_FILL, 0, 0, 0);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 
-	GtkWidget *format_albumdir = gtk_entry_new();
-	gtk_widget_show(format_albumdir);
-	gtk_table_attach(GTK_TABLE(table1), format_albumdir, 1, 2, 0, 1, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 0, 0);
+	GtkWidget *fmt_albumdir = gtk_entry_new();
+	gtk_widget_show(fmt_albumdir);
+	gtk_table_attach(t, fmt_albumdir, 1, 2, 0, 1, GTK_EXPAND_FILL, 0, 0, 0);
 
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, format_albumdir, _("This is relative to the destination folder (from the General tab).\n" "Can be blank.\n" "Default: %A - %L\n" "Other example: %A/%L"), NULL);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, fmt_albumdir,
+		_("This is relative to the destination folder (from the General tab).\n"
+		"Can be blank.\n" "Default: %A - %L\n" "Other example: %A/%L"), NULL);
 
-	GtkWidget *format_playlist = gtk_entry_new();
-	gtk_widget_show(format_playlist);
-	gtk_table_attach(GTK_TABLE(table1), format_playlist, 1, 2, 1, 2, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 0, 0);
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, format_playlist, _("This will be stored in the album directory.\n" "Can be blank.\n" "Default: %A - %L"), NULL);
+	GtkWidget *fmt_playlist = gtk_entry_new();
+	gtk_widget_show(fmt_playlist);
+	gtk_table_attach(t, fmt_playlist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, fmt_playlist,
+							_("This will be stored in the album directory.\n"
+							"Can be blank.\n" "Default: %A - %L"), NULL);
 
-	GtkWidget *format_music = gtk_entry_new();
-	gtk_widget_show(format_music);
-	gtk_table_attach(GTK_TABLE(table1), format_music, 1, 2, 2, 3, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 0, 0);
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, format_music, _("This will be stored in the album directory.\n" "Cannot be blank.\n" "Default: %A - %T\n" "Other example: %N - %T"), NULL);
+	GtkWidget *fmt_music = gtk_entry_new();
+	gtk_widget_show(fmt_music);
+	gtk_table_attach(t, fmt_music, 1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, fmt_music,
+							_("This will be stored in the album directory.\n"
+							"Cannot be blank.\n" "Default: %A - %T\n"
+							"Other example: %N - %T"), NULL);
 
 	label = gtk_label_new(_("Filename formats"));
 	gtk_widget_show(label);
-	gtk_frame_set_label_widget(GTK_FRAME(frame2), label);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
 	label = gtk_label_new(_("Filenames"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(GTK_NOTEBOOK(notebook1), gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook1), 1), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 1), label);
 	/* END FILENAMES tab */
 
 	/* ENCODE tab */
@@ -2007,98 +2372,106 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	/* WAV */
-	GtkWidget *frame0 = gtk_frame_new(NULL);
-	gtk_widget_show(frame0);
-	gtk_box_pack_start(GTK_BOX(vbox), frame0, FALSE, FALSE, 0);
-	GtkWidget *alignment1 = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment1);
-	gtk_container_add(GTK_CONTAINER(frame0), alignment1);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment1), 1, 1, 8, 8);
-	GtkWidget *vbox0 = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(vbox0);
-	gtk_container_add(GTK_CONTAINER(alignment1), vbox0);
+	frame = gtk_frame_new(NULL);
+	gtk_widget_show(frame);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
+	GtkWidget *alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(alignment);
+	gtk_container_add(GTK_CONTAINER(frame), alignment);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
+	vbox = gtk_vbox_new(FALSE, 0);
+	gtk_widget_show(vbox);
+	gtk_container_add(GTK_CONTAINER(alignment), vbox);
 
-	GtkWidget *rip_wav = gtk_check_button_new_with_mnemonic(_("WAV (uncompressed)"));
+	GtkWidget *rip_wav = gtk_check_button_new_with_mnemonic(
+													_("WAV (uncompressed)"));
 	gtk_widget_show(rip_wav);
-	gtk_frame_set_label_widget(GTK_FRAME(frame0), rip_wav);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_wav);
 
-	label = gtk_label_new(_("WAV files retain maximum sound quality, but they are very big."
-							" You should keep WAV files if you intend to create Audio discs."
-							" WAV files can be converted back to audio tracks with CD burning software."));
+	label = gtk_label_new(
+			_("WAV files retain maximum sound quality, but they are very big."
+			" You should keep WAV files if you intend to create Audio discs."
+			" WAV files can be converted back to audio tracks with CD burning"
+			" software."));
+
 	gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(vbox0), label, FALSE, FALSE, 0);
-
+	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	/* END WAV */
 
 	/* MP3 */
-	GtkWidget *frame3 = gtk_frame_new(NULL);
-	gtk_widget_show(frame3);
-	gtk_box_pack_start(GTK_BOX(vbox), frame3, FALSE, FALSE, 0);
+	frame = gtk_frame_new(NULL);
+	gtk_widget_show(frame);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
 
-	GtkWidget *alignment8 = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment8);
-	gtk_container_add(GTK_CONTAINER(frame3), alignment8);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment8), 1, 1, 8, 8);
+	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(alignment);
+	gtk_container_add(GTK_CONTAINER(frame), alignment);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
 
-	GtkWidget *vbox2 = gtk_vbox_new(FALSE, 6);
-	gtk_widget_show(vbox2);
-	gtk_container_add(GTK_CONTAINER(alignment8), vbox2);
+	vbox = gtk_vbox_new(FALSE, 6);
+	gtk_widget_show(vbox);
+	gtk_container_add(GTK_CONTAINER(alignment), vbox);
 
-	GtkWidget *mp3_vbr = gtk_check_button_new_with_mnemonic(_("Variable bit rate (VBR)"));
+	GtkWidget *mp3_vbr = gtk_check_button_new_with_mnemonic(
+											_("Variable bit rate (VBR)"));
 	gtk_widget_show(mp3_vbr);
-	gtk_box_pack_start(GTK_BOX(vbox2), mp3_vbr, FALSE, FALSE, 0);
-	g_signal_connect((gpointer) mp3_vbr, "toggled", G_CALLBACK(on_vbr_toggled), NULL);
+	BOXPACK(vbox, mp3_vbr, FALSE, FALSE, 0);
+	CONNECT_SIGNAL(mp3_vbr, "toggled", on_vbr_toggled);
 
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, mp3_vbr, _("Better quality for the same size."), NULL);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, mp3_vbr,
+							_("Better quality for the same size."), NULL);
 
 	GtkWidget *hboxcombo = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hboxcombo);
-	gtk_box_pack_start(GTK_BOX(vbox2), hboxcombo, FALSE, FALSE, 1);
+	BOXPACK(vbox, hboxcombo, FALSE, FALSE, 1);
 
 	label = gtk_label_new(_("Quality : "));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hboxcombo), label, FALSE, FALSE, 0);
+	BOXPACK(hboxcombo, label, FALSE, FALSE, 0);
 
-	GtkWidget *combo_mp3_quality = gtk_combo_box_new_text();
-	gtk_widget_show(combo_mp3_quality);
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, combo_mp3_quality, _("Choosing 'High quality' is recommended."), NULL);
-	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Low quality");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Good quality");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "High quality (recommended)");
-	gtk_combo_box_append_text(GTK_COMBO_BOX (combo_mp3_quality), "Maximum quality");
-	gtk_combo_box_set_active (GTK_COMBO_BOX (combo_mp3_quality), 2);
-	gtk_box_pack_start(GTK_BOX(hboxcombo), combo_mp3_quality, FALSE, FALSE, 0);
-	g_signal_connect((gpointer) combo_mp3_quality, "changed", G_CALLBACK(on_mp3_quality_changed), NULL);
+	GtkWidget *mp3_quality = gtk_combo_box_new_text();
+	gtk_widget_show(mp3_quality);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, mp3_quality,
+						_("Choosing 'High quality' is recommended."), NULL);
 
-	GtkWidget *hbox9 = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox9);
-	gtk_box_pack_start(GTK_BOX(vbox2), hbox9, FALSE, FALSE, 0);
+	GtkComboBox *cmb_mp3 = GTK_COMBO_BOX(mp3_quality);
+	gtk_combo_box_append_text(cmb_mp3, "Low quality");
+	gtk_combo_box_append_text(cmb_mp3, "Good quality");
+	gtk_combo_box_append_text(cmb_mp3, "High quality (recommended)");
+	gtk_combo_box_append_text(cmb_mp3, "Maximum quality");
+	gtk_combo_box_set_active(cmb_mp3, 2);
+	BOXPACK(hboxcombo, mp3_quality, FALSE, FALSE, 0);
+	CONNECT_SIGNAL(mp3_quality, "changed", on_mp3_quality_changed);
+
+	hbox = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hbox);
+	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
 
 	label = gtk_label_new(_("Bitrate : "));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox9), label, FALSE, FALSE, 0);
-	HOOKUP(prefs, label, "bitrate_lbl");
+	BOXPACK(hbox, label, FALSE, FALSE, 0);
 
-	char kbps_text[10];
-	int bitrate = mp3_quality_to_bitrate(global_prefs->mp3_quality,global_prefs->mp3_vbr);
-	snprintf(kbps_text, 10, _("%dKbps"), bitrate);
-	label = gtk_label_new(kbps_text);
+	int rate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
+	gchar *kbps = g_strdup_printf(_("%dKbps"), rate);
+	label = gtk_label_new(kbps);
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox9), label, FALSE, FALSE, 0);
-	HOOKUP(prefs, label, "bitrate_lbl_2");
+	g_free(kbps);
+	BOXPACK(hbox, label, FALSE, FALSE, 0);
+	HOOKUP(prefs, label, WDG_BITRATE);
 
-	GtkWidget *rip_mp3 = gtk_check_button_new_with_mnemonic(_("MP3 (lossy compression)"));
+	GtkWidget *rip_mp3 = gtk_check_button_new_with_mnemonic(
+												_("MP3 (lossy compression)"));
 	gtk_widget_show(rip_mp3);
-	gtk_frame_set_label_widget(GTK_FRAME(frame3), rip_mp3);
-	g_signal_connect((gpointer) rip_mp3, "toggled", G_CALLBACK(on_rip_mp3_toggled), NULL);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
+	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
 	/* END MP3 */
 
 	label = gtk_label_new(_("Encode"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(GTK_NOTEBOOK(notebook1), gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook1), 2), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 2), label);
 	/* END ENCODE tab */
 
 	/* ADVANCED tab */
@@ -2107,59 +2480,60 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
-	GtkWidget *frame = gtk_frame_new(NULL);
+	frame = gtk_frame_new(NULL);
 	gtk_frame_set_label(GTK_FRAME(frame), "CDDB");
 	gtk_widget_show(frame);
-	gtk_box_pack_start(GTK_BOX(vbox), frame, FALSE, FALSE, 0);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
 
 	GtkWidget *frameVbox = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(frameVbox);
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
-	GtkWidget *do_cddb_updates = gtk_check_button_new_with_mnemonic(_("Get disc info from the internet automatically"));
+	GtkWidget *do_cddb_updates = gtk_check_button_new_with_mnemonic(
+						_("Get disc info from the internet automatically"));
 	gtk_widget_show(do_cddb_updates);
-	gtk_box_pack_start(GTK_BOX(frameVbox), do_cddb_updates, FALSE, FALSE, 0);
-
-	GtkWidget *hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	gtk_box_pack_start(GTK_BOX(frameVbox), hbox, FALSE, FALSE, 1);
-
-	label = gtk_label_new(_("Server: "));
-	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 5);
-
-	GtkWidget *cddbServerName = gtk_entry_new();
-	gtk_widget_show(cddbServerName);
-	gtk_box_pack_start(GTK_BOX(hbox), cddbServerName, TRUE, TRUE, 5);
-	HOOKUP(prefs, cddbServerName, "cddb_server_name");
-
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, cddbServerName, _("The CDDB server to get disc info from (default is freedb.freedb.org)"), NULL);
+	BOXPACK(frameVbox, do_cddb_updates, FALSE, FALSE, 0);
 
 	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox);
-	gtk_box_pack_start(GTK_BOX(frameVbox), hbox, FALSE, FALSE, 1);
+	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
+
+	label = gtk_label_new(_("Server: "));
+	gtk_widget_show(label);
+	BOXPACK(hbox, label, FALSE, FALSE, 5);
+
+	GtkWidget *cddbServerName = gtk_entry_new();
+	gtk_widget_show(cddbServerName);
+	BOXPACK(hbox, cddbServerName, TRUE, TRUE, 5);
+
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, cddbServerName,
+								_("The CDDB server to get disc info from"
+								   " (default is freedb.freedb.org)"), NULL);
+	hbox = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hbox);
+	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
 	label = gtk_label_new(_("Port: "));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 5);
+	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *cddbPortNum = gtk_entry_new();
 	gtk_widget_show(cddbPortNum);
-	gtk_box_pack_start(GTK_BOX(hbox), cddbPortNum, TRUE, TRUE, 5);
-	HOOKUP(prefs, cddbPortNum, "cddb_port_number");
+	BOXPACK(hbox, cddbPortNum, TRUE, TRUE, 5);
 
-	tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, cddbPortNum, _("The CDDB server port (default is 8880)"), NULL);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, cddbPortNum,
+						_("The CDDB server port (default is 8880)"), NULL);
 
 	frame = gtk_frame_new(NULL);
 	gtk_widget_show(frame);
-	gtk_box_pack_start(GTK_BOX(vbox), frame, FALSE, FALSE, 0);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
 
-	GtkWidget *useProxy = gtk_check_button_new_with_mnemonic(_("Use an HTTP proxy to connect to the internet"));
+	GtkWidget *useProxy = gtk_check_button_new_with_mnemonic(
+							_("Use an HTTP proxy to connect to the internet"));
 	gtk_widget_show(useProxy);
 	gtk_frame_set_label_widget(GTK_FRAME(frame), useProxy);
-	HOOKUP(prefs, useProxy, "use_proxy");
 
 	frameVbox = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(frameVbox);
@@ -2167,84 +2541,89 @@ static GtkWidget *create_prefs(void)
 
 	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox);
-	gtk_box_pack_start(GTK_BOX(frameVbox), hbox, FALSE, FALSE, 1);
+	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
 	label = gtk_label_new(_("Server: "));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 5);
+	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *serverName = gtk_entry_new();
 	gtk_widget_show(serverName);
-	gtk_box_pack_start(GTK_BOX(hbox), serverName, TRUE, TRUE, 5);
-	HOOKUP(prefs, serverName, "server_name");
+	BOXPACK(hbox, serverName, TRUE, TRUE, 5);
 
 	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox);
-	gtk_box_pack_start(GTK_BOX(frameVbox), hbox, FALSE, FALSE, 1);
+	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
 	label = gtk_label_new(_("Port: "));
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, FALSE, 5);
+	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *portNum = gtk_entry_new();
 	gtk_widget_show(portNum);
-	gtk_box_pack_start(GTK_BOX(hbox), portNum, TRUE, TRUE, 5);
-	HOOKUP(prefs, portNum, "port_number");
+	BOXPACK(hbox, portNum, TRUE, TRUE, 5);
 
-	gchar *lbl = g_strdup_printf("Log to %s", global_prefs->log_file);
+	gchar *lbl = g_strdup_printf("Log to %s", g_prefs->log_file);
 	GtkWidget *log_file = gtk_check_button_new_with_label(lbl);
 	gtk_widget_show(log_file);
-	gtk_box_pack_start(GTK_BOX(vbox), log_file, FALSE, FALSE, 0);
-	HOOKUP(prefs, log_file, "do_log");
+	BOXPACK(vbox, log_file, FALSE, FALSE, 0);
 	g_free(lbl);
 
 	label = gtk_label_new(_("Advanced"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(GTK_NOTEBOOK(notebook1), gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook1), 3), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 3), label);
 	/* END ADVANCED tab */
 
-	GtkWidget *dialog_action_area1 = GTK_DIALOG(prefs)->action_area;
-	gtk_widget_show(dialog_action_area1);
-	gtk_button_box_set_layout(GTK_BUTTON_BOX(dialog_action_area1), GTK_BUTTONBOX_END);
+	GtkWidget *action_area = GTK_DIALOG(prefs)->action_area;
+	gtk_widget_show(action_area);
+	gtk_button_box_set_layout(GTK_BUTTON_BOX(action_area), GTK_BUTTONBOX_END);
 
-	GtkWidget *cancelbutton1 = gtk_button_new_from_stock("gtk-cancel");
-	gtk_widget_show(cancelbutton1);
-	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), cancelbutton1, GTK_RESPONSE_CANCEL);
-	GTK_WIDGET_SET_FLAGS(cancelbutton1, GTK_CAN_DEFAULT);
+	GtkWidget *cancel = gtk_button_new_from_stock(GTK_STOCK_CANCEL);
+	gtk_widget_show(cancel);
+	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), cancel, GTK_RESPONSE_CANCEL);
+	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
 
-	GtkWidget *okbutton1 = gtk_button_new_from_stock("gtk-ok");
-	gtk_widget_show(okbutton1);
-	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), okbutton1, GTK_RESPONSE_OK);
-	GTK_WIDGET_SET_FLAGS(okbutton1, GTK_CAN_DEFAULT);
+	GtkWidget *ok = gtk_button_new_from_stock(GTK_STOCK_OK);
+	gtk_widget_show(ok);
+	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), ok, GTK_RESPONSE_OK);
+	GTK_WIDGET_SET_FLAGS(ok, GTK_CAN_DEFAULT);
 
-	g_signal_connect((gpointer) prefs, "response", G_CALLBACK(on_prefs_response), NULL);
-	g_signal_connect((gpointer) prefs, "realize", G_CALLBACK(on_prefs_show), NULL);
+	CONNECT_SIGNAL(prefs, "response", on_prefs_response);
+	CONNECT_SIGNAL(prefs, "realize", on_prefs_show);
 
 	/* Store pointers to all widgets, for use by lookup_widget(). */
-	HOOKUP_OBJ_NOREF(prefs, prefs, "prefs");
+	HOOKUP_NOREF(prefs, prefs, "prefs");
+	HOOKUP(prefs, cddbServerName, "cddb_server_name");
+	HOOKUP(prefs, cddbPortNum, "cddb_port");
+	HOOKUP(prefs, useProxy, "use_proxy");
+	HOOKUP(prefs, serverName, "server_name");
+	HOOKUP(prefs, portNum, "port_number");
+	HOOKUP(prefs, log_file, "do_log");
 	HOOKUP(prefs, music_dir, "music_dir");
-	HOOKUP(prefs, make_playlist, "make_playlist");
+	HOOKUP(prefs, make_m3u, "make_playlist");
 	HOOKUP(prefs, cdrom, "cdrom");
+	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
 	HOOKUP(prefs, eject_on_done, "eject_on_done");
-	HOOKUP(prefs, format_music, "format_music");
-	HOOKUP(prefs, format_albumdir, "format_albumdir");
-	HOOKUP(prefs, format_playlist, "format_playlist");
+	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
+	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
+	HOOKUP(prefs, fmt_playlist, WDG_FMT_PLAYLIST);
 	HOOKUP(prefs, rip_wav, "rip_wav");
-	HOOKUP(prefs, mp3_vbr, "mp3_vbr");
-	HOOKUP(prefs, combo_mp3_quality, "combo_mp3_quality");
+	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
+	HOOKUP(prefs, mp3_quality, WDG_MP3_QUALITY);
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
 	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
 	return prefs;
 }
 
-static GtkWidget *ripping_bar( GtkWidget *table, char *name, int y) {
+static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
+	GtkTable *t = GTK_TABLE(table);
 	GtkWidget *label = gtk_label_new(_(name));
 	gtk_widget_show(label);
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, y, y+1, (GtkAttachOptions) (GTK_FILL), (GtkAttachOptions) (0), 5, 10);
+	gtk_table_attach(t, label, 0, 1, y, y+1, GTK_FILL, 0, 5, 10);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	GtkWidget *progress = gtk_progress_bar_new();
 	gtk_widget_show(progress);
-	gtk_table_attach(GTK_TABLE(table), progress, 1, 2, y, y+1, (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (0), 5, 10);
+	gtk_table_attach(t, progress, 1, 2, y, y+1, GTK_EXPAND_FILL, 0, 5, 10);
 	return progress;
 }
 
@@ -2258,118 +2637,93 @@ static void disable_widget(char *name) {
 
 static void disable_all_main_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN("tracklist"), FALSE);
-	disable_widget("lookup");
-	disable_widget("preferences");
-	disable_widget("disc");
+	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
+	disable_widget(WDG_DISC);
+	disable_widget(WDG_LBL_GENRE);
+	disable_widget(WDG_LBL_ALBUMTITLE);
+	disable_widget(WDG_LBL_ARTIST);
+	disable_widget(WDG_CDDB);
+	disable_widget(WDG_PREFS);
+	disable_widget(WDG_RIP);
+	disable_widget(WDG_SINGLE_ARTIST);
+	disable_widget(WDG_SINGLE_GENRE);
 	disable_widget(WDG_ALBUM_ARTIST);
-	disable_widget("artist_label");
-	disable_widget("title_label");
-	disable_widget(WDG_ALBUM_TITLE);
-	disable_widget("single_artist");
-	disable_widget("rip_button");
 	disable_widget(WDG_ALBUM_GENRE);
-	disable_widget("genre_label");
-	disable_widget("single_genre");
+	disable_widget(WDG_ALBUM_TITLE);
 	disable_widget(WDG_ALBUM_YEAR);
 }
 
 static void enable_all_main_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN("tracklist"), TRUE);
-	enable_widget("lookup");
-	enable_widget("preferences");
-	enable_widget("about");
-	enable_widget("disc");
+	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), TRUE);
+	enable_widget(WDG_DISC);
+	enable_widget(WDG_LBL_GENRE);
+	enable_widget(WDG_LBL_ALBUMTITLE);
+	enable_widget(WDG_LBL_ARTIST);
+	enable_widget(WDG_CDDB);
+	enable_widget(WDG_PREFS);
+	enable_widget(WDG_RIP);
+	enable_widget(WDG_SINGLE_ARTIST);
+	enable_widget(WDG_SINGLE_GENRE);
 	enable_widget(WDG_ALBUM_ARTIST);
-	enable_widget("artist_label");
-	enable_widget("title_label");
-	enable_widget(WDG_ALBUM_TITLE);
-	enable_widget("single_artist");
-	enable_widget("rip_button");
 	enable_widget(WDG_ALBUM_GENRE);
-	enable_widget("genre_label");
-	enable_widget("single_genre");
+	enable_widget(WDG_ALBUM_TITLE);
 	enable_widget(WDG_ALBUM_YEAR);
 }
 
 static void disable_mp3_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_PREF("mp3_vbr"), FALSE);
-	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl"), FALSE);
-	gtk_widget_set_sensitive(LKP_PREF("combo_mp3_quality"), FALSE);
-	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl_2"), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3VBR), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3_QUALITY), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_BITRATE), FALSE);
 }
 
 static void enable_mp3_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_PREF("mp3_vbr"), TRUE);
-	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl"), TRUE);
-	gtk_widget_set_sensitive(LKP_PREF("combo_mp3_quality"), TRUE);
-	gtk_widget_set_sensitive(LKP_PREF("bitrate_lbl_2"), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3VBR), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3_QUALITY), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_BITRATE), TRUE);
 }
 
 static void show_completed_dialog(int numOk, int numFailed)
 {
 #define CREATOK " created successfully"
 #define CREATKO "There was an error creating "
-    if (numFailed > 0) {
-		DIALOG_WARNING_CLOSE(ngettext(CREATKO "%d file", CREATKO "%d files", numFailed), numFailed);
+    if(numFailed > 0) {
+		DIALOG_WARNING_CLOSE(
+				ngettext(CREATKO "%d file", CREATKO "%d files", numFailed),
+				numFailed);
 	} else {
-		DIALOG_INFO_CLOSE(ngettext("%d file" CREATOK, "%d files" CREATOK, numOk), numOk);
+		DIALOG_INFO_CLOSE(
+				ngettext("%d file" CREATOK, "%d files" CREATOK, numOk),
+				numOk);
 	}
 }
 
-static prefs *new_prefs()
+static void clear_prefs(prefs *p)
 {
-	prefs *p = g_malloc0(sizeof(prefs));
-	return p;
-}
-
-static shared *new_shared_data()
-{
-	shared *p = g_malloc0(sizeof(shared));
-	return p;
-}
-
-static void clear_prefs(prefs * p)
-{
-	g_free(p->cdrom);
-	p->cdrom = NULL;
-
-	g_free(p->music_dir);
-	p->music_dir = NULL;
-
-	g_free(p->format_music);
-	p->format_music = NULL;
-
-	g_free(p->format_playlist);
-	p->format_playlist = NULL;
-
-	g_free(p->format_albumdir);
-	p->format_albumdir = NULL;
-
-	g_free(p->server_name);
-	p->server_name = NULL;
-
-	g_free(p->cddb_server_name);
-	p->cddb_server_name = NULL;
+	STR_FREE(p->music_dir);
+	STR_FREE(p->format_music);
+	STR_FREE(p->format_playlist);
+	STR_FREE(p->format_albumdir);
+	STR_FREE(p->server_name);
+	STR_FREE(p->cddb_server_name);
 }
 
 // free memory allocated for prefs struct
 // also frees any strings pointed to in the struct
-/*
-static void delete_prefs(prefs * p)
+static void free_prefs(prefs * p)
 {
+	STR_FREE(p->log_file);
 	clear_prefs(p);
-	free(p);
-}*/
+	g_free(p);
+}
 
 // returns a new prefs struct with all members set to nice default values
 // this struct must be freed with delete_prefs()
 static prefs *get_default_prefs()
 {
-	prefs *p = new_prefs();
+	prefs *p = g_malloc0(sizeof(prefs));
 	p->do_cddb_updates = 1;
 	p->do_log = 0;
 	p->max_log_size = 5000; // kb
@@ -2384,9 +2738,11 @@ static prefs *get_default_prefs()
 	p->rip_wav = 0;
 	p->use_proxy = 0;
 	p->port_number = DEFAULT_PROXY_PORT;
-	p->cddb_port_number = DEFAULT_CDDB_SERVER_PORT;
-	p->music_dir = g_strdup(getenv("HOME"));
-	p->cdrom = g_strdup("/dev/cdrom");
+	p->cddb_port= DEFAULT_CDDB_SERVER_PORT;
+	p->music_dir = get_default_music_dir();
+	strcpy(p->cdrom, "/dev/cdrom");
+	strcpy(p->tmp_cdrom, p->cdrom);
+	strcpy(p->drive, "DEFAULT");
 	p->format_music = g_strdup("%N - %A - %T");
 	p->format_playlist = g_strdup("%A - %L");
 	p->format_albumdir = g_strdup("%A - %L - %Y");
@@ -2395,47 +2751,90 @@ static prefs *get_default_prefs()
 	return p;
 }
 
-static void set_pref_text(char *widget_name, char *text)
-{
-	gtk_entry_set_text(GTK_ENTRY(lookup_widget(win_prefs, widget_name)), text);
-}
-
 static void set_pref_toggle(char *widget_name, int on_off)
 {
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lookup_widget(win_prefs, widget_name)), on_off);
+	gtk_toggle_button_set_active(
+					GTK_TOGGLE_BUTTON(LKP_PREF(widget_name)), on_off);
+}
+
+static GList* MakeDriveCombo()
+{
+	GList *l = g_data->drive_list;
+	GList *r = NULL;
+
+	if (l != NULL && g_list_length(l) > 0) {
+		for (GList *c = g_list_first(l); c != NULL; c = g_list_next(c)) {
+			s_drive *d = clone_drive((s_drive *) c->data);
+			r = g_list_append(r, d);
+		}
+	}
+	r = g_list_append(r, create_drive("AUTO", "Scan all CD-ROM drives"));
+	r = g_list_append(r, create_drive("DEFAULT", "Default '/dev/cdrom' device"));
+	r = g_list_append(r, create_drive("MANUAL", "User-defined device path"));
+	return r;
 }
 
 // sets up all of the widgets in the preferences dialog to
 // match the given prefs struct
-static void set_widgets_from_prefs(prefs * p)
+static void set_widgets_from_prefs(prefs *p)
 {
 	set_pref_text("cddb_server_name", p->cddb_server_name);
-	set_pref_text("cdrom", p->cdrom);
-	set_pref_text("format_albumdir", p->format_albumdir);
-	set_pref_text("format_music", p->format_music);
-	set_pref_text("format_playlist", p->format_playlist);
+	set_pref_text(WDG_FMT_ALBUMDIR, p->format_albumdir);
+	set_pref_text(WDG_FMT_MUSIC, p->format_music);
+	set_pref_text(WDG_FMT_PLAYLIST, p->format_playlist);
 	set_pref_text("server_name", p->server_name);
 
-	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(LKP_PREF("music_dir")), prefs_get_music_dir(p));
-	gtk_combo_box_set_active(GTK_COMBO_BOX(LKP_PREF("combo_mp3_quality")), p->mp3_quality);
+	gtk_file_chooser_set_current_folder(
+			GTK_FILE_CHOOSER(LKP_PREF("music_dir")), prefs_get_music_dir(p));
+
+	gtk_combo_box_set_active(COMBO_MP3Q, p->mp3_quality);
 
 	set_pref_toggle("do_cddb_updates", p->do_cddb_updates);
 	set_pref_toggle("do_log", p->do_log);
 	set_pref_toggle("eject_on_done", p->eject_on_done);
 	set_pref_toggle("make_playlist", p->make_playlist);
-	set_pref_toggle("mp3_vbr", p->mp3_vbr);
+	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
 	set_pref_toggle("rip_mp3", p->rip_mp3);
 	set_pref_toggle("rip_wav", p->rip_wav);
 	set_pref_toggle("use_proxy", p->use_proxy);
 
-	char tempStr[10];
-	snprintf(tempStr, 10, "%d", p->port_number);
-	set_pref_text("port_number", tempStr);
-	snprintf(tempStr, 10, "%d", p->cddb_port_number);
-	set_pref_text("cddb_port_number", tempStr);
+	gchar *num = g_strdup_printf("%d", p->port_number);
+	set_pref_text("port_number", num);
+	g_free(num);
+	num = g_strdup_printf("%d", p->cddb_port);
+	set_pref_text("cddb_port", num);
+	g_free(num);
 
-	/* disable widgets if needed */
-	if (!(p->rip_mp3)) disable_mp3_widgets();
+	set_pref_text("cdrom", p->cdrom);
+
+	GList *cmb = MakeDriveCombo();
+	GtkListStore *store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+	GtkTreeIter iter;
+	int active = 0;
+	int i = 0;
+	if (cmb != NULL) {
+		for(GList *curr = g_list_first(cmb);
+					curr != NULL; curr = g_list_next(curr)) {
+			s_drive *drive = (s_drive *) curr->data;
+			TRACEINFO("Model: [%s] Device [%s]", drive->model, drive->device);
+			gtk_list_store_append(store, &iter);
+			gtk_list_store_set(store, &iter, 0, drive->device,
+											 1, drive->model, -1);
+			if(g_prefs->drive
+				&& (strcmp(drive->model,g_prefs->drive)==0
+					|| strcmp(drive->device,g_prefs->drive)==0)
+				) {
+				// printf("DRIVE ACTIVE %d\n",i);
+				active = i;
+			}
+			i++;
+		}
+		gtk_combo_box_set_active(COMBO_DRIVE, active);
+	}
+	gtk_combo_box_set_model(COMBO_DRIVE, GTK_TREE_MODEL(store));
+	g_list_free_full(cmb, free_drive);
+	// disable mp3 widgets if needed
+	if(!(p->rip_mp3)) disable_mp3_widgets();
 }
 
 static gchar* get_pref_text(char *widget_name)
@@ -2446,37 +2845,62 @@ static gchar* get_pref_text(char *widget_name)
 
 static int get_pref_toggle(char *widget_name)
 {
-	return gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(lookup_widget(win_prefs, widget_name)));
+	return gtk_toggle_button_get_active(
+						GTK_TOGGLE_BUTTON(LKP_PREF(widget_name)));
+}
+
+static int get_main_toggle(char *widget_name)
+{
+	return gtk_toggle_button_get_active(
+						GTK_TOGGLE_BUTTON(LKP_MAIN(widget_name)));
 }
 
 // populates a prefs struct from the current state of the widgets
-static void get_prefs_from_widgets(prefs * p)
+static void get_prefs_from_widgets(prefs *p)
 {
 	clear_prefs(p);
 
-	gchar *tocopy = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(LKP_PREF("music_dir")));
+	gchar *tocopy = gtk_file_chooser_get_filename(
+									GTK_FILE_CHOOSER(LKP_PREF("music_dir")));
 	p->music_dir = g_strdup(tocopy);
 	g_free(tocopy);
-	p->mp3_quality = gtk_combo_box_get_active(GTK_COMBO_BOX(LKP_PREF("combo_mp3_quality")));
+	p->mp3_quality = gtk_combo_box_get_active(COMBO_MP3Q);
 
-	p->cdrom = get_pref_text("cdrom");
-	p->format_music = get_pref_text("format_music");
-	p->format_playlist = get_pref_text("format_playlist");
-	p->format_albumdir = get_pref_text("format_albumdir");
+	GtkTreeModel *m = gtk_combo_box_get_model(COMBO_DRIVE);
+	GtkTreeIter iter;
+	gchar *device = NULL;
+	gchar *model = NULL;
+	GtkComboBox *combo = COMBO_DRIVE;
+	if(gtk_combo_box_get_active_iter(combo, &iter)) {
+		gtk_tree_model_get(m, &iter, 0, &device, 1, &model, -1);
+		gint i = gtk_combo_box_get_active(COMBO_DRIVE);
+		gint l = g_list_length(g_data->drive_list);
+		if(i < l) {
+			strcpy(p->drive, model);
+			// printf("INSIDE MODELS => '%s'\n", p->drive);
+		} else {
+			strcpy(p->drive, device);
+			// printf("OUTSIDE MODELS => '%s'\n", p->drive);
+		}
+		g_free(device);
+		g_free(model);
+	}
+	strcpy(p->cdrom,p->tmp_cdrom);
+	p->format_music = get_pref_text(WDG_FMT_MUSIC);
+	p->format_playlist = get_pref_text(WDG_FMT_PLAYLIST);
+	p->format_albumdir = get_pref_text(WDG_FMT_ALBUMDIR);
 	p->cddb_server_name = get_pref_text("cddb_server_name");
 	p->server_name = get_pref_text("server_name");
-
 	p->make_playlist = get_pref_toggle("make_playlist");
 	p->rip_wav = get_pref_toggle("rip_wav");
 	p->rip_mp3 = get_pref_toggle("rip_mp3");
-	p->mp3_vbr = get_pref_toggle("mp3_vbr");
+	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
 	p->do_cddb_updates = get_pref_toggle("do_cddb_updates");
 	p->use_proxy = get_pref_toggle("use_proxy");
 	p->do_log = get_pref_toggle("do_log");
-
 	p->port_number = atoi(GET_PREF_TEXT("port_number"));
-	p->cddb_port_number = atoi(GET_PREF_TEXT("cddb_port_number"));
+	p->cddb_port= atoi(GET_PREF_TEXT("cddb_port"));
 }
 
 static bool create_directory(gchar *path)
@@ -2484,7 +2908,7 @@ static bool create_directory(gchar *path)
 	if(!is_directory(path)) {
 		mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
 		int rc = mkdir(path, mode);
-		if (rc != 0 && errno != EEXIST) {
+		if(rc != 0 && errno != EEXIST) {
 			return FALSE;
 		}
 	}
@@ -2521,22 +2945,21 @@ static gchar* get_config_path(const gchar *file_suffix)
 }
 
 // store the given prefs struct to the config file
-static void save_prefs(prefs * p)
+static void save_prefs(prefs *p)
 {
 	gchar *file = get_config_path(NULL);
 	if(!file) {
-		log_gen(__func__, LOG_FATAL, "Error: could not save configuration: %s", strerror(errno));
+		TRACERROR("could not save configuration: %s", strerror(errno));
 		return;
 	}
-
 	FILE *fd = fopen(file, "w");
-	if (fd == NULL) {
-		log_gen(__func__, LOG_WARN, "Warning: could not save fd file: %s", strerror(errno));
+	if(fd == NULL) {
+		TRACEWARN("could not save file: %s", strerror(errno));
 		g_free(file);
 		return;
 	}
-	log_gen(__func__, LOG_INFO, "Saving configuration");
 	fprintf(fd, "DEVICE=%s\n", p->cdrom);
+	fprintf(fd, "DRIVE=%s\n", p->drive);
 	fprintf(fd, "MUSIC_DIR=%s\n", p->music_dir);
 	fprintf(fd, "MAKE_PLAYLIST=%d\n", p->make_playlist);
 	fprintf(fd, "FORMAT_MUSIC=%s\n", p->format_music);
@@ -2557,17 +2980,31 @@ static void save_prefs(prefs * p)
 	fprintf(fd, "LOG_FILE=%s\n", p->log_file);
 	fprintf(fd, "MAX_LOG_SIZE=%d\n", p->max_log_size);
 	fprintf(fd, "CDDB_SERVER_NAME=%s\n", p->cddb_server_name);
-	fprintf(fd, "CDDB_PORT=%d\n", p->cddb_port_number);
+	fprintf(fd, "CDDB_PORT=%d\n", p->cddb_port);
 	fclose(fd);
 	g_free(file);
+	TRACEINFO("Configuration saved.");
+}
+
+static void set_device_from_drive(char *drive)
+{
+	if(strcmp(drive,"MANUAL")==0) {
+		strcpy(g_data->device, g_prefs->cdrom);
+	} else if(strcmp(drive,"DEFAULT")==0) {
+		strcpy(g_data->device, "/dev/cdrom");
+	} else if(strcmp(drive,"AUTO")==0) {
+	} else {
+	}
 }
 
 // load the prefereces from the config file into the given prefs struct
-static void load_prefs(prefs * p)
+static void load_prefs()
 {
+	g_prefs = get_default_prefs();
+	prefs *p = g_prefs;
 	gchar *file = get_config_path(NULL);
 	if(!file) {
-		log_gen(__func__, LOG_WARN, "Warning: could not get configuration file path: %s", strerror(errno));
+		TRACEWARN("could not get configuration file path: %s", strerror(errno));
 		return;
 	}
 	char *buf = NULL;
@@ -2581,7 +3018,17 @@ static void load_prefs(prefs * p)
 		return;
 	}
 	s = buf; // Start of HEADER section
-	get_field(s, file, "DEVICE", &(p->cdrom));
+	char *v = NULL;
+	if(get_field(s, file, "DEVICE", &v)) {
+		strcpy(p->cdrom, v);
+		strcpy(p->tmp_cdrom, v);
+	}
+	g_free(v);
+	get_field(s, file, "DRIVE", &v);
+	strcpy(p->drive, v);
+	g_free(v);
+	set_device_from_drive(p->drive);
+
 	get_field(s, file, "MUSIC_DIR", &(p->music_dir));
 	get_field_as_long(s,file,"MAKE_PLAYLIST", &(p->make_playlist));
 	get_field_as_long(s,file,"RIP_WAV", &(p->rip_wav));
@@ -2590,7 +3037,7 @@ static void load_prefs(prefs * p)
 
 	int i = 0;
 	if(get_field_as_long(s,file,"MP3_QUALITY", &i)) {;
-		if (i > -1 && i < 4) p->mp3_quality = i;
+		if(i > -1 && i < 4) p->mp3_quality = i;
 	}
 	i=0;
 	get_field_as_long(s,file,"WINDOW_WIDTH", &i);
@@ -2607,13 +3054,15 @@ static void load_prefs(prefs * p)
 	get_field_as_long(s,file,"USE_PROXY",&(p->use_proxy));
 	get_field_as_long(s,file,"PORT",&(p->port_number));
 	if (p->port_number == 0 || !is_valid_port_number(p->port_number)) {
-		printf("bad port number read from config file, using %d instead\n", DEFAULT_PROXY_PORT);
+		printf("bad port number read from config file, using %d instead\n",
+														DEFAULT_PROXY_PORT);
 		p->port_number = DEFAULT_PROXY_PORT;
 	}
-	get_field_as_long(s,file,"CDDB_PORT",&(p->cddb_port_number));
-	if (p->cddb_port_number == 0 || !is_valid_port_number(p->cddb_port_number)) {
-		printf("bad port number read from config file, using 888 instead\n");
-		p->cddb_port_number = DEFAULT_CDDB_SERVER_PORT;
+	get_field_as_long(s,file,"CDDB_PORT",&(p->cddb_port));
+	if (p->cddb_port== 0 || !is_valid_port_number(p->cddb_port)) {
+		printf("bad port number read from config file, using %d instead\n",
+													DEFAULT_CDDB_SERVER_PORT);
+		p->cddb_port= DEFAULT_CDDB_SERVER_PORT;
 	}
 	get_field(s, file, "SERVER_NAME", &(p->server_name));
 	get_field(s, file, "CDDB_SERVER_NAME", &(p->cddb_server_name));
@@ -2628,14 +3077,15 @@ static void load_prefs(prefs * p)
 
 // use this method when reading the "music_dir" field of a prefs struct
 // it will make sure it always points to a nice directory
-static char *prefs_get_music_dir(prefs * p)
+static char *prefs_get_music_dir(prefs *p)
 {
 	struct stat s;
 	if (stat(p->music_dir, &s) == 0) {
 		return p->music_dir;
 	}
-	gchar *newdir = g_strdup_printf("%s/%s", getenv("HOME"), "irongripped");
-	DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\nThe music directory will be reset to '%s'.", p->music_dir, newdir);
+	gchar *newdir = get_default_music_dir();
+	DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\n"
+			"The music directory will be reset to '%s'.", p->music_dir, newdir);
 	g_free(p->music_dir);
 	p->music_dir = newdir;
 	save_prefs(p);
@@ -2655,17 +3105,19 @@ static bool prefs_are_valid(void)
 	bool somethingWrong = false;
 
 	// playlistfile
-	if (string_has_slashes(GET_PREF_TEXT("format_playlist"))) {
-		DIALOG_ERROR_OK(_("Invalid characters in the '%s' field"), _("Playlist file: "));
+	if (string_has_slashes(GET_PREF_TEXT(WDG_FMT_PLAYLIST))) {
+		DIALOG_ERROR_OK(_("Invalid characters in the '%s' field"),
+						_("Playlist file: "));
 		somethingWrong = true;
 	}
 	// musicfile
-	if (string_has_slashes(GET_PREF_TEXT("format_music"))) {
-		DIALOG_ERROR_OK( _("Invalid characters in the '%s' field"), _("Music file: "));
+	if (string_has_slashes(GET_PREF_TEXT(WDG_FMT_MUSIC))) {
+		DIALOG_ERROR_OK(_("Invalid characters in the '%s' field"),
+						_("Music file: "));
 		somethingWrong = true;
 	}
-	if (strlen(GET_PREF_TEXT("format_music")) == 0) {
-		DIALOG_ERROR_OK( _("'%s' cannot be empty"), _("Music file: "));
+	if (strlen(GET_PREF_TEXT(WDG_FMT_MUSIC)) == 0) {
+		DIALOG_ERROR_OK(_("'%s' cannot be empty"), _("Music file: "));
 		somethingWrong = true;
 	}
 	// proxy port
@@ -2676,9 +3128,9 @@ static bool prefs_are_valid(void)
 		somethingWrong = true;
 	}
 	// cddb server port
-	int cddb_port_number;
-	rc = sscanf(GET_PREF_TEXT("cddb_port_number"), "%d", &cddb_port_number);
-	if (rc != 1 || !is_valid_port_number(cddb_port_number)) {
+	int cddb_port;
+	rc = sscanf(GET_PREF_TEXT("cddb_port"), "%d", &cddb_port);
+	if (rc != 1 || !is_valid_port_number(cddb_port)) {
 		DIALOG_ERROR_OK(_("Invalid cddb server port number"));
 		somethingWrong = true;
 	}
@@ -2702,35 +3154,37 @@ static bool confirmOverwrite(const char *pathAndName)
 {
 	// dont'ask yet
 	return true;
-	if (global_data->overwriteAll) return true;
-	if (global_data->overwriteNone) return false;
+	if (g_data->overwriteAll) return true;
+	if (g_data->overwriteNone) return false;
 
 	GtkWidget *dialog = gtk_dialog_new_with_buttons(_("Overwrite?"),
 					     GTK_WINDOW(win_main),
 					     GTK_DIALOG_DESTROY_WITH_PARENT,
-					     GTK_STOCK_YES,
-					     GTK_RESPONSE_ACCEPT, GTK_STOCK_NO, GTK_RESPONSE_REJECT, NULL);
+					     GTK_STOCK_YES, GTK_RESPONSE_ACCEPT,
+						 GTK_STOCK_NO, GTK_RESPONSE_REJECT, NULL);
 	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_REJECT);
 
 	char *lastSlash = strrchr(pathAndName, '/');
 	lastSlash++;
 
-	char msgStr[1024];
-	snprintf(msgStr, 1024, _("The file '%s' already exists. Do you want to overwrite it?\n"), lastSlash);
-	GtkWidget *label = gtk_label_new(msgStr);
+	gchar *m = g_strdup_printf(_("The file '%s' already exists."
+								" Do you want to overwrite it?\n"), lastSlash);
+	GtkWidget *label = gtk_label_new(m);
+	g_free(m);
 	gtk_widget_show(label);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), label, TRUE, TRUE, 0);
+	BOXPACK(GTK_DIALOG(dialog)->vbox, label, TRUE, TRUE, 0);
 
-	GtkWidget *checkbox = gtk_check_button_new_with_mnemonic(_("Remember the answer for _all the files made from this CD"));
+	GtkWidget *checkbox = gtk_check_button_new_with_mnemonic(
+			_("Remember the answer for _all the files made from this CD"));
 	gtk_widget_show(checkbox);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), checkbox, TRUE, TRUE, 0);
+	BOXPACK(GTK_DIALOG(dialog)->vbox, checkbox, TRUE, TRUE, 0);
 
 	int rc = gtk_dialog_run(GTK_DIALOG(dialog));
 	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checkbox))) {
 		if (rc == GTK_RESPONSE_ACCEPT)
-			global_data->overwriteAll = true;
+			g_data->overwriteAll = true;
 		else
-			global_data->overwriteNone = true;
+			g_data->overwriteNone = true;
 	}
 	gtk_widget_destroy(dialog);
 
@@ -2745,35 +3199,37 @@ static bool confirmOverwrite(const char *pathAndName)
 // aborts ripping- stops all the threads and return to normal execution
 static void abort_threads()
 {
-    global_data->aborted = true;
-    if (global_data->cdparanoia_pid != 0) {
-        kill(global_data->cdparanoia_pid, SIGKILL);
+    g_data->aborted = true;
+    if (g_data->cdparanoia_pid != 0) {
+        kill(g_data->cdparanoia_pid, SIGKILL);
 	}
-    if (global_data->lame_pid != 0) {
-        kill(global_data->lame_pid, SIGKILL);
+    if (g_data->lame_pid != 0) {
+        kill(g_data->lame_pid, SIGKILL);
 	}
-    /* wait until all the worker threads are done */
-    while (global_data->cdparanoia_pid != 0 || global_data->lame_pid != 0) {
+    // wait until all the worker threads are done
+    while (g_data->cdparanoia_pid != 0 || g_data->lame_pid != 0) {
         Sleep(300);
-		log_gen(__func__, LOG_INFO, "w1 cdparanoia=%d lame=%d", global_data->cdparanoia_pid, global_data->lame_pid);
+		TRACEINFO("cdparanoia=%d lame=%d", g_data->cdparanoia_pid,
+												g_data->lame_pid);
     }
-    g_cond_signal(global_data->available);
-    g_thread_join(global_data->ripper);
-    g_thread_join(global_data->encoder);
-    g_thread_join(global_data->tracker);
+    g_cond_signal(g_data->available);
+    g_thread_join(g_data->ripper);
+    g_thread_join(g_data->encoder);
+    g_thread_join(g_data->tracker);
     // gdk_flush();
-    global_data->working = false;
-    show_completed_dialog(global_data->numCdparanoiaOk + global_data->numLameOk, global_data->numCdparanoiaFailed + global_data->numLameFailed);
+    g_data->working = false;
+    show_completed_dialog(g_data->numCdparanoiaOk + g_data->numLameOk,
+						g_data->numCdparanoiaFailed + g_data->numLameFailed);
     gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
-    gtk_widget_hide(LKP_MAIN("win_ripping"));
-	gtk_widget_show(LKP_MAIN("scroll"));
+    gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
+	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
 	set_status("Job cancelled.");
 }
 
-static void on_cancel_clicked(GtkButton * button, gpointer user_data)
+static void on_cancel_clicked(GtkButton *button, gpointer user_data)
 {
-	log_gen(__func__, LOG_WARN, "on_cancel_clicked !!");
+	TRACEWARN("on_cancel_clicked !!");
 	abort_threads();
 }
 
@@ -2790,7 +3246,8 @@ void make_playlist(const char *filename, FILE ** file)
 	if (makePlaylist) {
 		*file = fopen(filename, "w");
 		if (*file == NULL) {
-			DIALOG_ERROR_OK( "Unable to create WAV playlist \"%s\": %s", filename, strerror(errno));
+			DIALOG_ERROR_OK("Unable to create WAV playlist \"%s\": %s",
+								filename, strerror(errno));
 		} else {
 			fprintf(*file, "#EXTM3U\n");
 		}
@@ -2798,23 +3255,20 @@ void make_playlist(const char *filename, FILE ** file)
 }
 
 // uses cdparanoia to rip a WAV track from a cdrom
-//
 // cdrom    - the path to the cdrom device
 // tracknum - the track to rip
 // filename - the name of the output WAV file
-// progress - the percent done
 static void cdparanoia(char *cdrom, int tracknum, char *filename)
 {
-	char trackstring[3];
-	snprintf(trackstring, 3, "%d", tracknum);
-	const char *args[] = { CDPARANOIA_PRG, "-e", "-d", cdrom, trackstring, filename, NULL };
+	gchar *trk = g_strdup_printf("%d", tracknum);
+	const char *args[] = { CDPARANOIA_PRG, "-e", "-d", cdrom, trk,
+							filename, NULL };
 
-	int fd = exec_with_output(args, STDERR_FILENO, &global_data->cdparanoia_pid);
+	int fd = exec_with_output(args, STDERR_FILENO, &g_data->cdparanoia_pid);
 	fd_set readfds;
 	FD_ZERO(&readfds);
 	FD_SET(fd, &readfds);
-
-	log_gen(__func__, LOG_TRACE, "Start of ripping track %d, fd=%d", tracknum, fd);
+	TRACEINFO("Start of ripping track %d, fd=%d", tracknum, fd);
 
 	// to convert the progress number stat cdparanoia spits out
 	// into sector numbers divide by 1176
@@ -2822,15 +3276,14 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 	char buf[256];
 	int size = 0;
 	do {
-		int pos;
-		pos = -1;
+		int pos = -1;
 		do {
 			/* Setup a timeout for read */
 			struct timeval timeout;
 			timeout.tv_sec = 16;
 			timeout.tv_usec = 0;
 			if(select(32, &readfds, NULL, NULL, &timeout) != 1) {
-				log_gen(__func__, LOG_WARN, "cdparanoia is FROZEN !");
+				TRACEWARN("cdparanoia is FROZEN !");
 				goto cleanup;
 			}
 			pos++;
@@ -2838,12 +3291,13 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 			/* signal interrupted read(), try again */
 			if (size == -1) {
 				if(errno == EINTR) {
-					log_gen(__func__, LOG_WARN, "signal interrupted read(), try again at position %d", pos);
+					TRACEWARN("signal interrupted read(),"
+								" try again at position %d", pos);
 					pos--;
 					size = 1;
 				} else {
 					perror("Read error from cdparanoia");
-					log_gen(__func__, LOG_WARN, "read error");
+					TRACEWARN("read error");
 				}
 			}
 		} while ((buf[pos] != '\n') && (size > 0) && (pos < 256));
@@ -2862,7 +3316,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 			sscanf(buf, "##: %d %s @ %d", &code, type, &sector);
 			sector /= 1176;
 			if (strncmp("[wrote]", type, 7) == 0) {
-				global_data->rip_percent = (double)(sector - start) / (end - start);
+				g_data->rip_percent = (double)(sector - start) / (end - start);
 			}
 		} else {
 			// printf("Unknown data : %s\n", buf);
@@ -2870,162 +3324,174 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 	} while (size > 0);
 
 cleanup:
-	log_gen(__func__, LOG_TRACE, "End of ripping track %d", tracknum);
+	TRACEINFO("End of ripping track %d", tracknum);
 	close(fd);
 	sigchld();
-	/* don't go on until the signal for the previous call is handled */
-	if (global_data->cdparanoia_pid != 0) {
-		kill(global_data->cdparanoia_pid, SIGKILL);
+	//  don't go on until the signal for the previous call is handled
+	if (g_data->cdparanoia_pid != 0) {
+		kill(g_data->cdparanoia_pid, SIGKILL);
 	}
+	g_free(trk);
 }
 
-// the thread that handles ripping tracks to WAV files
-static gpointer rip_thread(gpointer data)
+static void rip_track(int tracknum, const char *trackartist,
+										const char *tracktitle)
 {
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
-	gboolean single_artist = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(LKP_MAIN("single_artist")));
 	const char *albumartist = GET_MAIN_TEXT(WDG_ALBUM_ARTIST);
 	const char *albumtitle = GET_MAIN_TEXT(WDG_ALBUM_TITLE);
 	const char *albumyear = GET_MAIN_TEXT(WDG_ALBUM_YEAR);
 	const char *albumgenre = GET_MAIN_TEXT(WDG_ALBUM_GENRE);
 
+	char *albumdir = parse_format(g_prefs->format_albumdir, 0, albumyear,
+									albumartist, albumtitle, albumgenre, NULL);
+
+	char *musicfilename = parse_format(g_prefs->format_music, tracknum,
+				albumyear, trackartist, albumtitle, albumgenre, tracktitle);
+
+	char *wavfilename = make_filename(prefs_get_music_dir(g_prefs), albumdir,
+														musicfilename, "wav");
+
+	// TODO: set_status("Ripping track %d to \"%s\"\n", tracknum, wavfilename);
+
+	if (g_data->aborted) g_thread_exit(NULL);
+	struct stat statStruct;
+	bool doRip = true;;
+	int rc = stat(wavfilename, &statStruct);
+	if (rc == 0) {
+		gdk_threads_enter();
+		if (!confirmOverwrite(wavfilename)) doRip = false;
+		gdk_threads_leave();
+	}
+	if (doRip) {
+		cdparanoia(g_data->device, tracknum, wavfilename);
+	}
+	g_free(albumdir);
+	g_free(musicfilename);
+	g_free(wavfilename);
+	g_data->rip_percent = 0.0;
+	g_data->rip_tracks_completed++;
+	TRACEINFO("NOW rip_tracks_completed = %d", g_data->rip_tracks_completed);
+}
+
+// the thread that handles ripping tracks to WAV files
+static gpointer rip_thread(gpointer data)
+{
+	GtkListStore *store = get_tracklist_store();
+	gboolean single_artist = get_main_toggle(WDG_SINGLE_ARTIST);
+	const char *albumartist = GET_MAIN_TEXT(WDG_ALBUM_ARTIST);
+
 	GtkTreeIter iter;
-	gboolean rowsleft = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter);
+	GtkTreeModel *tree_store = GTK_TREE_MODEL(store);
+	gboolean rowsleft = gtk_tree_model_get_iter_first(tree_store, &iter);
 
 	while (rowsleft) {
 		int riptrack;
 		int tracknum;
-		const char *trackartist;
-		const char *trackyear = 0;
-		const char *tracktitle;
-		gtk_tree_model_get(GTK_TREE_MODEL(store), &iter,
-				   COL_RIPTRACK, &riptrack,
-				   COL_TRACKNUM, &tracknum,
-				   COL_TRACKARTIST, &trackartist,
-				   COL_TRACKTITLE, &tracktitle, COL_YEAR, &trackyear, -1);
+		char *trackartist;
+		char *trackyear;
+		char *tracktitle;
+		gtk_tree_model_get(tree_store, &iter,
+							   COL_RIPTRACK, &riptrack,
+							   COL_TRACKNUM, &tracknum,
+							   COL_TRACKARTIST, &trackartist,
+							   COL_TRACKTITLE, &tracktitle,
+							   COL_YEAR, &trackyear, -1);
 
 		if (single_artist) {
-			trackartist = albumartist;
+			trackartist = g_strdup(albumartist);
 		}
 		if (riptrack) {
-			char *albumdir = parse_format(global_prefs->format_albumdir, 0, albumyear, albumartist, albumtitle, albumgenre, NULL);
-			//~ musicfilename = parse_format(global_prefs->format_music, tracknum, trackyear, trackartist, albumtitle, tracktitle);
-			char *musicfilename = parse_format(global_prefs->format_music, tracknum, albumyear, trackartist, albumtitle, albumgenre, tracktitle);
-			char *wavfilename = make_filename(prefs_get_music_dir(global_prefs), albumdir, musicfilename, "wav");
-
-			// TODO: set_status("Ripping track %d to \"%s\"\n", tracknum, wavfilename);
-
-			if (global_data->aborted) g_thread_exit(NULL);
-
-			struct stat statStruct;
-			bool doRip = true;;
-
-			int rc = stat(wavfilename, &statStruct);
-			if (rc == 0) {
-				gdk_threads_enter();
-				if (!confirmOverwrite(wavfilename)) doRip = false;
-				gdk_threads_leave();
-			}
-			if (doRip) {
-				cdparanoia(global_prefs->cdrom, tracknum, wavfilename);
-			}
-
-			g_free(albumdir);
-			g_free(musicfilename);
-			g_free(wavfilename);
-			global_data->rip_percent = 0.0;
-			global_data->rip_tracks_completed++;
-			log_gen(__func__, LOG_INFO, "NOW rip_tracks_completed = %d", global_data->rip_tracks_completed);
+			rip_track(tracknum, trackartist, tracktitle);
 		}
-		g_mutex_lock(global_data->barrier);
-		global_data->counter++;
-		g_mutex_unlock(global_data->barrier);
-		g_cond_signal(global_data->available);
-
-		if (global_data->aborted) g_thread_exit(NULL);
-		rowsleft = gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter);
+		g_free(trackartist);
+		g_free(trackyear);
+		g_free(tracktitle);
+		g_mutex_lock(g_data->barrier);
+		g_data->counter++;
+		g_mutex_unlock(g_data->barrier);
+		g_cond_signal(g_data->available);
+		if (g_data->aborted) g_thread_exit(NULL);
+		rowsleft = gtk_tree_model_iter_next(tree_store, &iter);
 	}
 	// no more tracks to rip, safe to eject
-	if (global_prefs->eject_on_done) {
+	if (g_prefs->eject_on_done) {
 		set_status("Trying to eject disc...");
-		eject_disc(global_prefs->cdrom);
+		eject_disc(g_data->device);
 	}
 	return NULL;
 }
 
 static void set_status(char *text) {
-	GtkWidget *s = LKP_MAIN("statusLbl");
+	GtkWidget *s = LKP_MAIN(WDG_STATUS);
 	gtk_label_set_text(GTK_LABEL(s), _(text));
 	gtk_label_set_use_markup(GTK_LABEL(s), TRUE);
 }
 
 static void reset_counters()
 {
-	global_data->working = true;
-	global_data->aborted = false;
-	global_data->allDone = false;
-	global_data->counter = 0;
-	global_data->barrier = g_mutex_new();
-	global_data->available = g_cond_new();
-	global_data->mp3_percent = 0.0;
-	global_data->rip_tracks_completed = 0;
-	global_data->encode_tracks_completed = 0;
-	global_data->numCdparanoiaFailed = 0;
-	global_data->numLameFailed = 0;
-	global_data->numCdparanoiaOk = 0;
-	global_data->numLameOk = 0;
-	global_data->rip_percent = 0.0;
+	g_data->working = true;
+	g_data->aborted = false;
+	g_data->allDone = false;
+	g_data->counter = 0;
+	g_data->barrier = g_mutex_new();
+	g_data->available = g_cond_new();
+	g_data->mp3_percent = 0.0;
+	g_data->rip_tracks_completed = 0;
+	g_data->encode_tracks_completed = 0;
+	g_data->numCdparanoiaFailed = 0;
+	g_data->numLameFailed = 0;
+	g_data->numCdparanoiaOk = 0;
+	g_data->numLameOk = 0;
+	g_data->rip_percent = 0.0;
 }
 
 // spawn needed threads and begin ripping
 static void dorip()
 {
 	reset_counters();
-
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
-	GtkTreeIter iter;
-	gboolean rowsleft = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter);
-
-	const char *albumartist = gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(WDG_ALBUM_ARTIST)));
-	const char *albumtitle = gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(WDG_ALBUM_TITLE)));
-	const char *albumyear = gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(WDG_ALBUM_YEAR)));
-	const char *albumgenre = gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(WDG_ALBUM_GENRE)));
-	char *albumdir = parse_format(global_prefs->format_albumdir, 0, albumyear, albumartist, albumtitle, albumgenre, NULL);
-	char *playlist = parse_format(global_prefs->format_playlist, 0, albumyear, albumartist, albumtitle, albumgenre, NULL);
-
-	global_data->overwriteAll = false;
-	global_data->overwriteNone = false;
-
 	set_status("make sure there's at least one format to rip to");
-	if (!global_prefs->rip_wav && !global_prefs->rip_mp3) {
-		DIALOG_ERROR_OK(_("No ripping/encoding method selected. Please enable one from the 'Preferences' menu."));
-		g_free(albumdir);
-		g_free(playlist);
+	if (!g_prefs->rip_wav && !g_prefs->rip_mp3) {
+		DIALOG_ERROR_OK(_("No ripping/encoding method selected."
+						" Please enable one from the 'Preferences' menu."));
 		return;
 	}
-	set_status("make sure there's some tracks to rip");
-	rowsleft = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter);
-	global_data->tracks_to_rip = 0;
+	const char *albumartist = GET_MAIN_TEXT(WDG_ALBUM_ARTIST);
+	const char *albumtitle = GET_MAIN_TEXT(WDG_ALBUM_TITLE);
+	const char *albumyear = GET_MAIN_TEXT(WDG_ALBUM_YEAR);
+	const char *albumgenre = GET_MAIN_TEXT(WDG_ALBUM_GENRE);
+	g_data->overwriteAll = false;
+	g_data->overwriteNone = false;
+	GtkListStore *store = get_tracklist_store();
+	GtkTreeModel *tree_store = GTK_TREE_MODEL(store);
+	GtkTreeIter iter;
+	gboolean rowsleft = gtk_tree_model_get_iter_first(tree_store, &iter);
+	g_data->tracks_to_rip = 0;
 	while (rowsleft) {
 		int riptrack;
-		gtk_tree_model_get(GTK_TREE_MODEL(store), &iter, COL_RIPTRACK, &riptrack, -1);
-		if (riptrack) global_data->tracks_to_rip++;
-		rowsleft = gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter);
+		gtk_tree_model_get(tree_store, &iter, COL_RIPTRACK, &riptrack, -1);
+		if (riptrack) g_data->tracks_to_rip++;
+		rowsleft = gtk_tree_model_iter_next(tree_store, &iter);
 	}
-	if (global_data->tracks_to_rip == 0) {
-		DIALOG_ERROR_OK(_("No tracks were selected for ripping/encoding. Please select at least one track."));
-		g_free(albumdir);
-		g_free(playlist);
+	if (g_data->tracks_to_rip == 0) {
+		DIALOG_ERROR_OK(_("No tracks were selected for ripping/encoding."
+							" Please select at least one track."));
 		return;
 	}
 
 	set_status("Verify album directory...");
-	/* CREATE the album directory */
-	char *dirpath = make_filename(prefs_get_music_dir(global_prefs), albumdir, NULL, NULL);
-	log_gen(__func__, LOG_INFO, "Making album directory '%s'", dirpath);
+	char *albumdir = parse_format(g_prefs->format_albumdir, 0,
+						albumyear, albumartist, albumtitle, albumgenre, NULL);
+	char *playlist = parse_format(g_prefs->format_playlist, 0,
+						albumyear, albumartist, albumtitle, albumgenre, NULL);
 
-	if (recursive_mkdir(dirpath, S_IRWXU | S_IRWXG | S_IRWXO) != 0 && errno != EEXIST) {
-		DIALOG_ERROR_OK("Unable to create directory '%s': %s", dirpath, strerror(errno));
+	/* CREATE the album directory */
+	char *dirpath = make_filename(prefs_get_music_dir(g_prefs), albumdir,
+																NULL, NULL);
+	TRACEINFO("Making album directory '%s'", dirpath);
+
+	if (recursive_mkdir(dirpath) != 0 && errno != EEXIST) {
+		DIALOG_ERROR_OK("Unable to create directory '%s': %s",
+									dirpath, strerror(errno));
 		g_free(dirpath);
 		g_free(albumdir);
 		g_free(playlist);
@@ -3034,17 +3500,19 @@ static void dorip()
 	g_free(dirpath);
 	/* END CREATE the album directory */
 
-	if (global_prefs->make_playlist) {
+	if (g_prefs->make_playlist) {
 		set_status("Creating playlists");
 
-		if (global_prefs->rip_wav) {
-			char *filename = make_filename(prefs_get_music_dir(global_prefs), albumdir, playlist, "wav.m3u");
-			make_playlist(filename, &(global_data->playlist_wav));
+		if (g_prefs->rip_wav) {
+			char *filename = make_filename(prefs_get_music_dir(g_prefs),
+											albumdir, playlist, "wav.m3u");
+			make_playlist(filename, &(g_data->playlist_wav));
 			g_free(filename);
 		}
-		if (global_prefs->rip_mp3) {
-			char *filename = make_filename(prefs_get_music_dir(global_prefs), albumdir, playlist, "mp3.m3u");
-			make_playlist(filename, &(global_data->playlist_mp3));
+		if (g_prefs->rip_mp3) {
+			char *filename = make_filename(prefs_get_music_dir(g_prefs),
+											albumdir, playlist, "mp3.m3u");
+			make_playlist(filename, &(g_data->playlist_mp3));
 			g_free(filename);
 		}
 	}
@@ -3053,17 +3521,18 @@ static void dorip()
 
 	set_status("Working...");
 	disable_all_main_widgets();
-	gtk_widget_show(LKP_MAIN("win_ripping"));
-	gtk_widget_hide(LKP_MAIN("scroll"));
+	gtk_widget_show(LKP_MAIN(WDG_RIPPING));
+	gtk_widget_hide(LKP_MAIN(WDG_SCROLL));
 
-	global_data->ripper = g_thread_create(rip_thread, NULL, TRUE, NULL);
-	global_data->encoder = g_thread_create(encode_thread, NULL, TRUE, NULL);
-	global_data->tracker = g_thread_create(track_thread, NULL, TRUE, NULL);
+	g_data->ripper = g_thread_create(rip_thread, NULL, TRUE, NULL);
+	g_data->encoder = g_thread_create(encode_thread, NULL, TRUE, NULL);
+	g_data->tracker = g_thread_create(track_thread, NULL, TRUE, NULL);
 }
 
-static void lamehq(int tracknum, char *artist, char *album, char *title, char *genre, char *year, char *wavfilename, char *mp3filename)
+static void lamehq(int tracknum, char *artist, char *album, char *title,
+				char *genre, char *year, char *wavfilename, char *mp3filename)
 {
-	log_gen(__func__, LOG_INFO, "lame() Genre: %s Artist: %s Title: %s", genre, artist, title);
+	TRACEINFO("Genre: %s Artist: %s Title: %s", genre, artist, title);
 
 	// nice lame -q 0 -v -V 0 $file #  && rm $file
 	//  --cbr -b 224
@@ -3076,15 +3545,14 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 	args[pos++] = "-q";
 	args[pos++] = "0";
 	args[pos++] = "--id3v2-only";
-	if(global_prefs->mp3_vbr) {
+	if(g_prefs->mp3_vbr) {
 		args[pos++] = "-V";
 		args[pos++] = "0";
 	} else {
 		args[pos++] = "--cbr";
 	}
 	args[pos++] = "-b";
-	int bitrate = mp3_quality_to_bitrate(global_prefs->mp3_quality,global_prefs->mp3_vbr);
-
+	int bitrate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
 	char br_txt[8];
 	snprintf(br_txt, 8, "%d", bitrate);
 	args[pos++] = br_txt;
@@ -3107,8 +3575,8 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 		args[pos++] = "--tt";
 		args[pos++] = title;
 	}
-	// lame refuses to accept some genres that come from cddb, and users get upset
-	// No longer an issue - users can now edit the genre field -lnr
+	// lame refuses some genres that come from cddb.
+	// Users can edit the genre field.
 	if ((genre != NULL) && (strlen(genre))) {
 		args[pos++] = "--tg";
 		args[pos++] = genre;
@@ -3121,7 +3589,7 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 	args[pos++] = mp3filename;
 	args[pos++] = NULL;
 
-	int fd = exec_with_output(args, STDERR_FILENO, &global_data->lame_pid);
+	int fd = exec_with_output(args, STDERR_FILENO, &g_data->lame_pid);
 	int size = 0;
 	do {
 		char buf[256];
@@ -3135,13 +3603,14 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 				pos--;
 				size = 1;
 			}
-		} while ((buf[pos] != '\r') && (buf[pos] != '\n') && (size > 0) && (pos < 256));
+		} while ((buf[pos] != '\r') && (buf[pos] != '\n')
+								&& (size > 0) && (pos < 256));
 		buf[pos] = '\0';
 
 		int sector;
 		int end;
 		if (sscanf(buf, "%d/%d", &sector, &end) == 2) {
-			global_data->mp3_percent = (double)sector / end;
+			g_data->mp3_percent = (double)sector / end;
 		}
 	} while (size > 0);
 	close(fd);
@@ -3149,288 +3618,309 @@ static void lamehq(int tracknum, char *artist, char *album, char *title, char *g
 	sigchld();
 }
 
+static void set_main_completion(const gchar *widget_name)
+{
+	GtkWidget *w = LKP_MAIN(widget_name);
+	add_completion(w);
+	save_completion(w);
+}
+
+static void encode_track(char *genre, int tracknum, char *trackartist,
+									char *tracktitle, char *tracktime)
+{
+	char *album_artist = (char *)GET_MAIN_TEXT(WDG_ALBUM_ARTIST);
+	char *album_year   = (char *)GET_MAIN_TEXT(WDG_ALBUM_YEAR);
+	char *album_title  = (char *)GET_MAIN_TEXT(WDG_ALBUM_TITLE);
+	// char *album_genre  = GET_MAIN_TEXT(WDG_ALBUM_GENRE);
+
+	char *albumdir = parse_format(g_prefs->format_albumdir, 0,
+						album_year, album_artist, album_title, genre, NULL);
+
+	char *musicfilename = parse_format(g_prefs->format_music, tracknum,
+					album_year, trackartist, album_title, genre, tracktitle);
+
+	char *wavfilename = make_filename(prefs_get_music_dir(g_prefs),
+										albumdir, musicfilename, "wav");
+
+	char *mp3filename = make_filename(prefs_get_music_dir(g_prefs),
+										albumdir, musicfilename, "mp3");
+	g_free(musicfilename);
+	g_free(albumdir);
+	int min;
+	int sec;
+	sscanf(tracktime, "%d:%d", &min, &sec);
+
+	if (g_prefs->rip_mp3) {
+		TRACEINFO("Encoding track %d to '%s'", tracknum, mp3filename);
+		if (g_data->aborted) g_thread_exit(NULL);
+
+		struct stat statStruct;
+		int	rc = stat(mp3filename, &statStruct);
+		bool doEncode = true;
+		if (rc == 0) {
+			gdk_threads_enter();
+			if (!confirmOverwrite(mp3filename))
+				doEncode = false;
+			gdk_threads_leave();
+		}
+		if (doEncode) {
+			lamehq(tracknum, trackartist, album_title, tracktitle,
+					genre, album_year, wavfilename, mp3filename);
+		}
+		if (g_data->aborted) g_thread_exit(NULL);
+
+		if (g_data->playlist_mp3) {
+			fprintf(g_data->playlist_mp3, "#EXTINF:%d,%s - %s\n",
+					(min * 60) + sec, trackartist, tracktitle);
+			fprintf(g_data->playlist_mp3, "%s\n", basename(mp3filename));
+			fflush(g_data->playlist_mp3);
+		}
+	}
+	g_free(mp3filename);
+
+	if (!g_prefs->rip_wav) {
+		TRACEINFO("Removing track %d WAV file", tracknum);
+		if (unlink(wavfilename) != 0) {
+			TRACEWARN("Unable to delete WAV file \"%s\": %s",
+					wavfilename, strerror(errno));
+		}
+	} else {
+		if (g_data->playlist_wav) {
+			fprintf(g_data->playlist_wav, "#EXTINF:%d,%s - %s\n",
+					(min * 60) + sec, trackartist, tracktitle);
+			fprintf(g_data->playlist_wav, "%s\n", basename(wavfilename));
+			fflush(g_data->playlist_wav);
+		}
+	}
+	g_free(wavfilename);
+	g_data->mp3_percent = 0.0;
+	g_data->encode_tracks_completed++;
+}
+
 // the thread that handles encoding WAV files to all other formats
 static gpointer encode_thread(gpointer data)
 {
-	char *musicfilename = NULL;
-	char *trackartist = NULL;
-	char *tracktime = NULL;
-	char *tracktitle = NULL;
-	char *trackyear;
+	set_main_completion(WDG_ALBUM_ARTIST);
+	set_main_completion(WDG_ALBUM_TITLE);
+	set_main_completion(WDG_ALBUM_GENRE);
 
-	GtkListStore *store = GTK_LIST_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))));
-	gboolean single_artist = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(LKP_MAIN("single_artist")));
-	gboolean single_genre = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(LKP_MAIN("single_genre")));
+	gboolean single_artist = get_main_toggle(WDG_SINGLE_ARTIST);
+	gboolean single_genre = get_main_toggle(WDG_SINGLE_GENRE);
 
-	GtkWidget *album_artist_widget = LKP_MAIN(WDG_ALBUM_ARTIST);
-	const char *temp_album_artist = gtk_entry_get_text(GTK_ENTRY(album_artist_widget));
-	char *album_artist = g_strdup(temp_album_artist);
-	add_completion(album_artist_widget);
-	save_completion(album_artist_widget);
-
-	const char *temp_year = gtk_entry_get_text(GTK_ENTRY(LKP_MAIN(WDG_ALBUM_YEAR)));
-	char *album_year = g_strdup(temp_year);
-
-	GtkWidget *album_title_widget = LKP_MAIN(WDG_ALBUM_TITLE);
-	const char *temp_album_title = gtk_entry_get_text(GTK_ENTRY(album_title_widget));
-	char *album_title = g_strdup(temp_album_title);
-	add_completion(album_title_widget);
-	save_completion(album_title_widget);
-
-	GtkWidget *album_genre_widget = LKP_MAIN(WDG_ALBUM_GENRE);
-	const char *temp_album_genre = gtk_entry_get_text(GTK_ENTRY(album_genre_widget));
-	char *album_genre = g_strdup(temp_album_genre);
-	add_completion(album_genre_widget);
-	save_completion(album_genre_widget);
-
+	GtkListStore *store = get_tracklist_store();
 	GtkTreeIter iter;
-	gboolean rowsleft = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter);
-
-	while (rowsleft) {
-		g_mutex_lock(global_data->barrier);
-		while ((global_data->counter < 1) && (!global_data->aborted)) {
-			g_cond_wait(global_data->available, global_data->barrier);
+	GtkTreeModel *tree_store = GTK_TREE_MODEL(store);
+	gboolean row = gtk_tree_model_get_iter_first(tree_store, &iter);
+	while (row) {
+		g_mutex_lock(g_data->barrier);
+		while ((g_data->counter < 1) && (!g_data->aborted)) {
+			g_cond_wait(g_data->available, g_data->barrier);
 		}
-		global_data->counter--;
-		g_mutex_unlock(global_data->barrier);
-		if (global_data->aborted) g_thread_exit(NULL);
+		g_data->counter--;
+		g_mutex_unlock(g_data->barrier);
+		if (g_data->aborted) g_thread_exit(NULL);
 
-		int riptrack;
-		int tracknum;
+		int riptrack = 0;
+		int tracknum = 0;
 		char *genre = NULL;
-		gtk_tree_model_get(GTK_TREE_MODEL(store), &iter,
-				   COL_RIPTRACK, &riptrack,
-				   COL_TRACKNUM, &tracknum,
-				   COL_TRACKARTIST, &trackartist,
-				   COL_TRACKTITLE, &tracktitle,
-				   COL_TRACKTIME, &tracktime, COL_GENRE, &genre, COL_YEAR, &trackyear, -1);
-
-		int min;
-		int sec;
-		sscanf(tracktime, "%d:%d", &min, &sec);
-
+		char *trackartist = NULL;
+		char *tracktime = NULL;
+		char *tracktitle = NULL;
+		char *trackyear = NULL;
+		gtk_tree_model_get(tree_store, &iter,
+							   COL_RIPTRACK, &riptrack,
+							   COL_TRACKNUM, &tracknum,
+							   COL_TRACKARTIST, &trackartist,
+							   COL_TRACKTITLE, &tracktitle,
+							   COL_TRACKTIME, &tracktime,
+							   COL_GENRE, &genre,
+							   COL_YEAR, &trackyear, -1);
 		if (single_artist) {
-			trackartist = album_artist;
+			g_free(trackartist);
+			trackartist = g_strdup(GET_MAIN_TEXT(WDG_ALBUM_ARTIST));
 		}
-		if (single_genre) genre = album_genre;
-
+		if (single_genre) {
+			g_free(genre);
+			genre = g_strdup(GET_MAIN_TEXT(WDG_ALBUM_GENRE));
+		}
 		if (riptrack) {
-			char *albumdir = parse_format(global_prefs->format_albumdir, 0, album_year, album_artist, album_title, genre, NULL);
-			//~ musicfilename = parse_format(global_prefs->format_music, tracknum, trackyear, trackartist, album_title, tracktitle);
-			musicfilename = parse_format(global_prefs->format_music, tracknum, album_year, trackartist, album_title, genre, tracktitle);
-			char *wavfilename = NULL;
-			wavfilename = make_filename(prefs_get_music_dir(global_prefs), albumdir, musicfilename, "wav");
-			char *mp3filename = NULL;
-			mp3filename = make_filename(prefs_get_music_dir(global_prefs), albumdir, musicfilename, "mp3");
-
-			if (global_prefs->rip_mp3) {
-				log_gen(__func__, LOG_INFO, "Encoding track %d to \"%s\"", tracknum, mp3filename);
-				if (global_data->aborted) g_thread_exit(NULL);
-
-				struct stat statStruct;
-				int	rc = stat(mp3filename, &statStruct);
-				bool doEncode = true;
-				if (rc == 0) {
-					gdk_threads_enter();
-					if (!confirmOverwrite(mp3filename))
-						doEncode = false;
-					gdk_threads_leave();
-				}
-				if (doEncode) {
-					lamehq(tracknum, trackartist, album_title, tracktitle, genre, album_year, wavfilename, mp3filename);
-				}
-				if (global_data->aborted) g_thread_exit(NULL);
-
-				if (global_data->playlist_mp3) {
-					fprintf(global_data->playlist_mp3, "#EXTINF:%d,%s - %s\n", (min * 60) + sec, trackartist, tracktitle);
-					fprintf(global_data->playlist_mp3, "%s\n", basename(mp3filename));
-					fflush(global_data->playlist_mp3);
-				}
-			}
-			if (!global_prefs->rip_wav) {
-				log_gen(__func__, LOG_INFO, "Removing track %d WAV file", tracknum);
-				if (unlink(wavfilename) != 0) {
-					log_gen(__func__, LOG_WARN, "Unable to delete WAV file \"%s\": %s", wavfilename, strerror(errno));
-				}
-			} else {
-				if (global_data->playlist_wav) {
-					fprintf(global_data->playlist_wav, "#EXTINF:%d,%s - %s\n", (min * 60) + sec, trackartist, tracktitle);
-					fprintf(global_data->playlist_wav, "%s\n", basename(wavfilename));
-					fflush(global_data->playlist_wav);
-				}
-			}
-			g_free(albumdir);
-			g_free(musicfilename);
-			g_free(wavfilename);
-			g_free(mp3filename);
-
-			global_data->mp3_percent = 0.0;
-			global_data->encode_tracks_completed++;
+			encode_track(genre, tracknum, trackartist, tracktitle, tracktime);
 		}
-		if (global_data->aborted) g_thread_exit(NULL);
+		g_free(genre);
+		g_free(trackartist);
+		g_free(tracktime);
+		g_free(tracktitle);
+		g_free(trackyear);
 
-		rowsleft = gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter);
+		if (g_data->aborted) g_thread_exit(NULL);
+		row = gtk_tree_model_iter_next(tree_store, &iter);
 	}
-	g_free(album_artist);
-	g_free(album_title);
-	g_free(album_genre);
 
-	if (global_data->playlist_wav)
-		fclose(global_data->playlist_wav);
-	global_data->playlist_wav = NULL;
-	if (global_data->playlist_mp3)
-		fclose(global_data->playlist_mp3);
-	global_data->playlist_mp3 = NULL;
+	if (g_data->playlist_wav) fclose(g_data->playlist_wav);
+	g_data->playlist_wav = NULL;
+	if (g_data->playlist_mp3) fclose(g_data->playlist_mp3);
+	g_data->playlist_mp3 = NULL;
 
-	g_mutex_free(global_data->barrier);
-	global_data->barrier = NULL;
-	g_cond_free(global_data->available);
-	global_data->available = NULL;
+	g_mutex_free(g_data->barrier);
+	g_data->barrier = NULL;
+	g_cond_free(g_data->available);
+	g_data->available = NULL;
 
-	log_gen(__func__, LOG_INFO, "rip_percent= %f %%", global_data->rip_percent);
+	TRACEINFO("rip_percent= %f %%", g_data->rip_percent);
 	/* wait until all the worker threads are done */
-	while (global_data->cdparanoia_pid != 0 || global_data->lame_pid != 0) {
-		printf("w2\n");
+	while (g_data->cdparanoia_pid != 0 || g_data->lame_pid != 0) {
+		// printf("w2\n");
 		Sleep(300);
 	}
 	Sleep(200);
-	log_gen(__func__, LOG_INFO, "Waking up to allDone");
-	global_data->allDone = true;		// so the tracker thread will exit
-	global_data->working = false;
+	TRACEINFO("Waking up to allDone");
+	g_data->allDone = true;		// so the tracker thread will exit
+	g_data->working = false;
 	gdk_threads_enter();
-	show_completed_dialog(global_data->numCdparanoiaOk + global_data->numLameOk, global_data->numCdparanoiaFailed + global_data->numLameFailed);
-	gtk_widget_hide(LKP_MAIN("win_ripping"));
-	gtk_widget_show(LKP_MAIN("scroll"));
+	show_completed_dialog(g_data->numCdparanoiaOk + g_data->numLameOk,
+						g_data->numCdparanoiaFailed + g_data->numLameFailed);
+	gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
+	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
 	gdk_threads_leave();
 	return NULL;
 }
 
-// the thread that calculates the progress of the other threads and updates the progress bars
+// calculates the progress of the other threads and updates the progress bars
 static gpointer track_thread(gpointer data)
 {
 	int parts = 1;
-	if (global_prefs->rip_mp3) parts++;
+	if (g_prefs->rip_mp3) parts++;
 	gdk_threads_enter();
-	GtkProgressBar *progress_total = GTK_PROGRESS_BAR(LKP_MAIN("progress_total"));
-	GtkProgressBar *progress_rip = GTK_PROGRESS_BAR(LKP_MAIN("progress_rip"));
-	GtkProgressBar *progress_encode = GTK_PROGRESS_BAR(LKP_MAIN("progress_encode"));
-	gtk_progress_bar_set_fraction(progress_total, 0.0);
-	gtk_progress_bar_set_text(progress_total, _("Waiting..."));
-	gtk_progress_bar_set_fraction(progress_rip, 0.0);
-	gtk_progress_bar_set_text(progress_rip, _("Waiting..."));
+	GtkProgressBar *pbar_total = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_TOTAL));
+	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
+	GtkProgressBar *pbar_encode = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_ENCODE));
+	gtk_progress_bar_set_fraction(pbar_total, 0.0);
+	gtk_progress_bar_set_text(pbar_total, _("Waiting..."));
+	gtk_progress_bar_set_fraction(pbar_rip, 0.0);
+	gtk_progress_bar_set_text(pbar_rip, _("Waiting..."));
 	if (parts > 1) {
-		gtk_progress_bar_set_fraction(progress_encode, 0.0);
-		gtk_progress_bar_set_text(progress_encode, _("Waiting..."));
+		gtk_progress_bar_set_fraction(pbar_encode, 0.0);
+		gtk_progress_bar_set_text(pbar_encode, _("Waiting..."));
 	} else {
-		gtk_progress_bar_set_fraction(progress_encode, 1.0);
-		gtk_progress_bar_set_text(progress_encode, "100% (0/0)");
+		gtk_progress_bar_set_fraction(pbar_encode, 1.0);
+		gtk_progress_bar_set_text(pbar_encode, "100% (0/0)");
 	}
 	gdk_threads_leave();
 
 	double prip;
+	int torip;
+	int completed;
 	char srip[32];
 	double pencode = 0;
 	char sencode[13];
 	double ptotal = 0.0;;
 	bool started = false;
 
-	while (!global_data->allDone && ptotal < 1.0) {
-		if (global_data->aborted) {
-			log_gen(__func__, LOG_WARN, "Aborted 1");
+	while (!g_data->allDone && ptotal < 1.0) {
+		if (g_data->aborted) {
+			TRACEWARN("Aborted 1");
 			g_thread_exit(NULL);
 		}
-		if(!started && global_data->rip_percent <= 0.0 && (parts == 1 || global_data->mp3_percent <= 0.0)) {
+		if(!started && g_data->rip_percent <= 0.0
+			&& (parts == 1 || g_data->mp3_percent <= 0.0)) {
 			Sleep(400);
 			continue;
 		}
 		started = true;
-		prip = (global_data->rip_tracks_completed + global_data->rip_percent) / global_data->tracks_to_rip;
-		snprintf(srip, 32, "%02.2f%% (%d/%d)", (prip * 100), (global_data->rip_tracks_completed < global_data->tracks_to_rip) ? (global_data->rip_tracks_completed + 1) : global_data->tracks_to_rip, global_data->tracks_to_rip);
+		torip = g_data->tracks_to_rip;
+		completed = g_data->rip_tracks_completed;
+
+		prip = (completed + g_data->rip_percent) / torip;
+		snprintf(srip, 32, "%02.2f%% (%d/%d)", (prip * 100),
+				(completed < torip) ? (completed + 1) : torip, torip);
+
 		if(prip>1.0) {
-			log_gen(__func__, LOG_WARN, "prip overflow=%.2f%% completed=%d rip=%.2f%% remain=%d", prip, global_data->rip_tracks_completed, global_data->rip_percent, global_data->tracks_to_rip);
+			TRACEWARN("prip overflow=%.2f%% completed=%d rip=%.2f%% remain=%d",
+						prip, completed, g_data->rip_percent, torip);
 			prip=1.0;
 		}
 		if (parts > 1) {
-			pencode = ((double)global_data->encode_tracks_completed / (double)global_data->tracks_to_rip) + ((global_data->mp3_percent) / (parts - 1) / global_data->tracks_to_rip);
-			snprintf(sencode, 13, "%d%% (%d/%d)", (int)(pencode * 100), (global_data->encode_tracks_completed < global_data->tracks_to_rip) ? (global_data->encode_tracks_completed + 1) : global_data->tracks_to_rip, global_data->tracks_to_rip);
+			completed = g_data->encode_tracks_completed;
+			pencode = ((double)completed / (double)torip)
+					+ ((g_data->mp3_percent) / (parts - 1) / torip);
+
+			snprintf(sencode, 13, "%d%% (%d/%d)", (int)(pencode * 100),
+				(completed < torip) ? (completed + 1) : torip, torip);
+
 			ptotal = prip / parts + pencode * (parts - 1) / parts;
 		} else {
 			ptotal = prip;
 		}
-		char stotal[9];
-		snprintf(stotal, 9, "%02.2f%%", ptotal * 100);
-
-		char windowTitle[32];	/* "IronGrip - 100%" */
-		strcpy(windowTitle, PROGRAM_NAME " - ");
-		strcat(windowTitle, stotal);
-		if (global_data->aborted) {
-			log_gen(__func__, LOG_WARN, "Aborted 2");
+		if (g_data->aborted) {
+			TRACEWARN("Aborted 2");
 			g_thread_exit(NULL);
 		}
-
 		gdk_threads_enter();
-		gtk_progress_bar_set_fraction(progress_rip, prip);
-		gtk_progress_bar_set_text(progress_rip, srip);
+		gtk_progress_bar_set_fraction(pbar_rip, prip);
+		gtk_progress_bar_set_text(pbar_rip, srip);
 		if (parts > 1) {
-			gtk_progress_bar_set_fraction(progress_encode, pencode);
-			gtk_progress_bar_set_text(progress_encode, sencode);
+			gtk_progress_bar_set_fraction(pbar_encode, pencode);
+			gtk_progress_bar_set_text(pbar_encode, sencode);
 		}
-		gtk_progress_bar_set_fraction(progress_total, ptotal);
-		gtk_progress_bar_set_text(progress_total, stotal);
+		gtk_progress_bar_set_fraction(pbar_total, ptotal);
+		gchar *stotal = g_strdup_printf("%02.2f%%", ptotal * 100);
+		gtk_progress_bar_set_text(pbar_total, stotal);
+		gchar *windowTitle = g_strdup_printf("%s - %s", PROGRAM_NAME, stotal);
 		gtk_window_set_title(GTK_WINDOW(win_main), windowTitle);
+		g_free(windowTitle);
+		g_free(stotal);
 		gdk_threads_leave();
 		Sleep(200);
 	}
 	gdk_threads_enter();
 	set_status("Ready.");
-	gtk_window_set_title(GTK_WINDOW(win_main), "Iron Grip");
+	gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
 	gdk_threads_leave();
-	log_gen(__func__, LOG_TRACE, "The End.");
+	TRACEINFO("The End.");
 	return NULL;
 }
 
 // signal handler to find out when our child has exited
 static void sigchld()
 {
-	if (global_prefs == NULL)
+	if (g_prefs == NULL)
 		return;
 
 	int status = -1;
 	pid_t pid = wait(&status);
-	log_gen(__func__, LOG_INFO, "waited for %d, status=%d (know about wav %d, mp3 %d)",
-			pid, status, global_data->cdparanoia_pid, global_data->lame_pid);
+	TRACEINFO("waited for %d, status=%d (know about wav %d, mp3 %d)",
+			pid, status, g_data->cdparanoia_pid, g_data->lame_pid);
 
-	if (pid != global_data->cdparanoia_pid && pid != global_data->lame_pid) {
-		log_gen(__func__, LOG_FATAL, "unknown pid, report bug please");
+	if (pid != g_data->cdparanoia_pid && pid != g_data->lame_pid) {
+		TRACERROR("unknown pid '%d', please report bug.", pid);
 	}
 	if (WIFEXITED(status)) {
-		// log_gen(__func__, LOG_INFO, "exited, status=%d", WEXITSTATUS(status));
+		// TRACEINFO("exited, status=%d", WEXITSTATUS(status));
 	} else if (WIFSIGNALED(status)) {
-		log_gen(__func__, LOG_INFO, "killed by signal %d", WTERMSIG(status));
+		TRACEINFO("killed by signal %d", WTERMSIG(status));
 	} else if (WIFSTOPPED(status)) {
-		log_gen(__func__, LOG_INFO, "stopped by signal %d", WSTOPSIG(status));
+		TRACEINFO("stopped by signal %d", WSTOPSIG(status));
 	} else if (WIFCONTINUED(status)) {
-		log_gen(__func__, LOG_INFO, "continued");
+		TRACEINFO("continued");
 	}
-
 	if (status != 0) {
-		if (pid == global_data->cdparanoia_pid) {
-			global_data->cdparanoia_pid = 0;
-			if (global_prefs->rip_wav)
-				global_data->numCdparanoiaFailed++;
-		} else if (pid == global_data->lame_pid) {
-			global_data->lame_pid = 0;
-			global_data->numLameFailed++;
+		if (pid == g_data->cdparanoia_pid) {
+			g_data->cdparanoia_pid = 0;
+			if (g_prefs->rip_wav)
+				g_data->numCdparanoiaFailed++;
+		} else if (pid == g_data->lame_pid) {
+			g_data->lame_pid = 0;
+			g_data->numLameFailed++;
 		}
 	} else {
-		if (pid == global_data->cdparanoia_pid) {
-			global_data->cdparanoia_pid = 0;
-			if (global_prefs->rip_wav)
-				global_data->numCdparanoiaOk++;
-		} else if (pid == global_data->lame_pid) {
-			global_data->lame_pid = 0;
-			global_data->numLameOk++;
+		if (pid == g_data->cdparanoia_pid) {
+			g_data->cdparanoia_pid = 0;
+			if (g_prefs->rip_wav)
+				g_data->numCdparanoiaOk++;
+		} else if (pid == g_data->lame_pid) {
+			g_data->lame_pid = 0;
+			g_data->numLameOk++;
 		}
 	}
 }
@@ -3440,9 +3930,8 @@ static void sigchld()
 // args - a valid array for execvp()
 // toread - the file descriptor to pipe back to the parent
 // p - a place to write the PID of the exec'ed process
-//
-// returns - a file descriptor that reads whatever the program outputs on "toread"
-static int exec_with_output(const char *args[], int toread, pid_t * p)
+// returns - a file descriptor that reads the program output on "toread"
+static int exec_with_output(const char *args[], int toread, pid_t *p)
 {
 	int pipefd[2];
 
@@ -3451,29 +3940,16 @@ static int exec_with_output(const char *args[], int toread, pid_t * p)
 
 	if ((*p = fork()) == 0) { // im the child, i execute the command
 		close(pipefd[0]); // close the side of the pipe we don't need
-
 		// setup output
 		dup2(pipefd[1], toread);
 		close(pipefd[1]);
-
 		// call execvp
 		execvp(args[0], (char **)args);
-
 		// should never get here
 		fatalError("exec_with_output(): execvp() failed");
 	}
-
 	// i'm the parent
-	log_gen(__func__, LOG_INFO, "%d started: %s ", *p, args[0]);
-	/*
-	int count;
-	printf("\nARGS:\n");
-	for (count = 1; args[count] != NULL; count++) {
-		printf("%s|",args[count]);
-		//log_gen(__func__, LOG_INFO, "%s ", args[count]);
-	}
-	printf("\n");
-	*/
+	TRACEINFO("%d started: %s ", *p, args[0]);
 	// close the side of the pipe we don't need
 	close(pipefd[1]);
 	return pipefd[0];
@@ -3481,40 +3957,29 @@ static int exec_with_output(const char *args[], int toread, pid_t * p)
 
 int main(int argc, char *argv[])
 {
-	global_data = new_shared_data();
-	global_prefs = get_default_prefs();
-	load_prefs(global_prefs);
+	g_data = g_malloc0(sizeof(shared));
+	load_prefs();
 	log_init();
-
 #ifdef ENABLE_NLS
-	/* initialize gettext */
 	bindtextdomain(PACKAGE, PACKAGE_LOCALE_DIR);
-	bind_textdomain_codeset(PACKAGE, UTF8);	/* so that gettext() returns UTF-8 strings */
+	bind_textdomain_codeset(PACKAGE, UTF8);
 	textdomain(PACKAGE);
 #endif
-
 	g_thread_init(NULL);
 	gdk_threads_init();
 	gtk_init(&argc, &argv);
-
 	win_main = create_main();
+	win_prefs = create_prefs();
 	gtk_widget_show(win_main);
-
-	if(!lookup_cdparanoia()) {
-		// exit(-1);
-	}
-
-	// set up recurring timeout to automatically re-scan the cdrom once in a while
-	// g_timeout_add_seconds(10, idle, (void *)1);
-	// The above function requires glib >= 2.14.
+	lookup_cdparanoia();
+	// recurring timeout to automatically re-scan cdrom once in a while
 	g_timeout_add(10000, idle, (void *)1);
-
 	// add an idle event to scan the cdrom drive ASAP
 	g_idle_add(scan_on_startup, NULL);
-
 	gtk_main();
-
+	free_prefs(g_prefs);
 	log_end();
+	g_free(g_data);
 	return 0;
 }
 

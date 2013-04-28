@@ -12,6 +12,7 @@ Features
 --------
 - Supports WAV and MP3 encoding
 - Uses CDDB
+- Finds cdrom drives
 
 Requirements
 ------------

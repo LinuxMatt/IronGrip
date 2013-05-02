@@ -65,9 +65,6 @@ Then run:
 If you get errors, it's probably a missing GNU tool or dependency.
 You can run the compiled program from the 'src' directory.
 
-You should not use 'make install' for the moment, because it has not been thoroughly tested yet.
-Coming soon ;)
-
 History
 -------
 IronGrip is a stripped-down (and experimental) fork of the Asunder project.

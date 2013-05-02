@@ -11,14 +11,18 @@ AC_ISC_POSIX
 AC_PROG_RANLIB
 AC_PROG_CC
 AM_PROG_CC_STDC
+AC_PROG_INSTALL
 AC_HEADER_STDC
 AC_HEADER_STDBOOL
-AC_CHECK_HEADERS([fcntl.h libintl.h limits.h pthread.h stdlib.h string.h sys/ioctl.h unistd.h])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h libintl.h limits.h netdb.h netinet/in.h pthread.h stdlib.h string.h sys/ioctl.h sys/socket.h sys/time.h sys/timeb.h unistd.h])
+AC_C_INLINE
 AC_TYPE_MODE_T
 AC_TYPE_PID_T
+AC_TYPE_SIZE_T
 AC_FUNC_FORK
 AC_FUNC_MALLOC
-AC_CHECK_FUNCS([bzero dup2 memset mkdir strdup strerror strrchr strtol])
+AC_FUNC_REALLOC
+AC_CHECK_FUNCS([alarm bzero dup2 ftime gethostbyname memset mkdir regcomp select socket strchr strdup strerror strrchr strtol])
 
 pkg_modules="gtk+-2.0 >= 2.8.0, gthread-2.0 >= 2.4.0, glib-2.0 >= 2.10.0"
 PKG_CHECK_MODULES(PACKAGE, [$pkg_modules])
@@ -40,9 +44,9 @@ CFLAGS="-DDEBUG -O0 -ggdb -Wall -pedantic -std=gnu99"
 AC_DEFINE([PROGRAM_NAME], ["IronGrip"], ["Program name"])
 
 AC_OUTPUT([
-Makefile
 libcddb/Makefile
 src/Makefile
 po/Makefile.in
+Makefile
 ])
 

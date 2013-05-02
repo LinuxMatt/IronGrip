@@ -2,7 +2,6 @@
 # This file is intended for maintainers to do a clean build of the project from scratch
 
 PROGRAM=irongrip
-INSTALL_PREFIX="${HOME}/opt"
 
 if [[ -z ${1} ]] ; then
 	echo "USAGE: $0 <clean|build>"
@@ -61,8 +60,8 @@ echo "* Running autoconf ..."
 autoconf || exit 2
 echo "* Running intltoolize ..."
 intltoolize  -c || exit 2
-echo "* Running configure with prefix=$INSTALL_PREFIX ..."
-./configure --prefix=${INSTALL_PREFIX} || exit 2
+echo "* Running configure..."
+./configure || exit 2
 echo "* Running make ..."
 make
 

@@ -4,7 +4,7 @@
 PROGRAM=irongrip
 
 if [[ -z ${1} ]] ; then
-	echo "USAGE: $0 <clean|build>"
+	echo "USAGE: $0 <clean|build|package>"
 	exit 2
 fi
 ACTION=$1
@@ -39,8 +39,21 @@ rm stamp-h1 2>/dev/null
 rm config.guess 2>/dev/null
 rm config.sub 2>/dev/null
 rm ltmain.sh 2>/dev/null
+#DEB CLEANUP
+rm debian/files 2>/dev/null
+rm debian/irongrip.debhelper.log 2>/dev/null
+rm debian/irongrip.postinst.debhelper 2>/dev/null
+rm debian/irongrip.postrm.debhelper 2>/dev/null
+rm debian/irongrip.substvars 2>/dev/null
+rm -r debian/irongrip/ 2>/dev/null
 
-if [ "x${ACTION}" != "xbuild" ];
+# ../irongrip_0.4-1_amd64.changes
+# ../irongrip_0.4-1_amd64.deb
+# ../irongrip_0.4-1.debian.tar.gz
+# ../irongrip_0.4-1.dsc
+# ../irongrip_0.4.orig.tar.gz
+
+if [ "x${ACTION}" == "xclean" ];
 then
 	echo "CLEANED UP MAINTAINER FILES ONLY."
 	exit 1
@@ -63,5 +76,19 @@ intltoolize  -c || exit 2
 echo "* Running configure..."
 ./configure || exit 2
 echo "* Running make ..."
-make
+make || exit 2
+
+if [ "x${ACTION}" != "xpackage" ];
+then
+	exit 0
+fi
+
+VERSION=$(head -1 debian/changelog | cut -f2 -d" " | tr -d \(\) | cut -f1 -d"-")
+ORIGTGZ=${PROGRAM}_${VERSION}.orig.tar.gz
+cd ..
+rm ${ORIGTGZ} 2>/dev/null
+tar -czf ${ORIGTGZ} ${PROGRAM}/ || exit 2
+cd -
+dpkg-buildpackage
+
 

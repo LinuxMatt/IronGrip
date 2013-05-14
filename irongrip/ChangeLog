@@ -1,0 +1,8 @@
+
+For an overview of the changes, the file 'debian/changelog' contains a summary
+of the main changes between package releases.
+
+For a detailed list of the changes:
+- you can use the 'git log' command
+- you can go to https://github.com/LinuxMatt/IronGrip/commits/master
+

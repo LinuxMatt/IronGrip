@@ -22,3 +22,6 @@ po/irongrip.po
 # vi files
 .exrc
 
+# Packages
+*.deb
+

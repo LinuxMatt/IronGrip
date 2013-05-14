@@ -2,7 +2,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.59])
 AC_INIT(configure.ac)
-AM_INIT_AUTOMAKE(irongrip, 0.3)
+AM_INIT_AUTOMAKE(irongrip, 0.4)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 IT_PROG_INTLTOOL([0.34.90])

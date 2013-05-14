@@ -9,6 +9,6 @@ Exec=irongrip
 Terminal=false
 StartupNotify=true
 Type=Application
-Categories=Audio;
+Categories=AudioVideo;Audio;
 Icon=irongrip
 

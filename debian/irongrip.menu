@@ -1,0 +1,4 @@
+?package(irongrip):needs="X11" section="Applications/Sound"\
+  title="IronGrip" longtitle="audio CD ripper and encoder"\
+  description="IronGrip is a graphical Audio CD ripper and encoder. It can be used to save tracks from an Audio CDs."\
+  command="/usr/bin/irongrip" icon="/usr/share/pixmaps/irongrip.png"

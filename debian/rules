@@ -1,0 +1,28 @@
+#!/usr/bin/make -f
+# debian/rules for irongrip.
+
+VERSION=$(shell head -1 debian/changelog | cut -f2 -d" " | tr -d \(\) | cut -f1 -d"-")
+get-orig-source:
+	#git clone git://github.com/LinuxMatt/IronGrip.git
+	mkdir -p irongrip-$(VERSION)
+	tar --exclude=debian --exclude=\*~ --exclude=\.git --exclude=\.pc \
+		--exclude=irongrip-$(VERSION) --exclude=accounts.txt -cf - . \
+		| ( cd irongrip-$(VERSION) && tar xf - )
+	tar -czf ../irongrip_$(VERSION).orig.tar.gz irongrip-$(VERSION)
+	$(RM) -r irongrip-$(VERSION)
+
+%:
+	dh ${@}
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -f config.guess config.sub
+
+override_dh_auto_configure:
+	cp -f /usr/share/misc/config.guess .
+	cp -f /usr/share/misc/config.sub .
+	dh_auto_configure
+
+override_dh_auto_install:
+	dh_auto_install
+	mv debian/irongrip/usr/share/pixmaps debian/irongrip/usr/share/icons

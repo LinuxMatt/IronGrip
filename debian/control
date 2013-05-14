@@ -1,0 +1,25 @@
+Source: irongrip
+Section: sound
+Priority: optional
+Maintainer: Matt Thirtytwo (LinuxMatt) <matt.59491@gmail.com>
+Build-Depends: debhelper (>= 7.0.50~), autotools-dev,
+ libgtk2.0-dev, dpkg (>= 1.15.5.6), intltool
+Standards-Version: 3.9.3
+Homepage: https://github.com/LinuxMatt/IronGrip
+
+Package: irongrip
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}, cdparanoia
+Recommends: audacious
+Suggests: lame
+Description: graphical audio CD ripper and encoder
+ IronGrip is a graphical Audio CD ripper and encoder. It can be used to
+ save tracks from Audio CDs. Main features:
+ .
+  * Supports WAV and MP3
+  * Uses CDDB to name and tag each track
+  * Can encode to multiple formats in one session
+  * Can find and scan all cdrom drives
+  * Creates M3U playlists
+  * Allows for each track to be by a different artist
+  * Does not require a specific desktop environment (just GTK+)

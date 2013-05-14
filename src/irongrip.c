@@ -199,17 +199,26 @@ enum {
     NUM_COLS
 };
 
+#define SZENTRY 256
+
+static void szcopy(char dst[SZENTRY], const gchar *src)
+{
+	memset(dst,0,SZENTRY);
+	if(src == NULL) return;
+	strncpy(dst,src,SZENTRY-1);
+}
+
 typedef struct _prefs {
-    char drive[128]; // MANUAL, AUTO, DEFAULT, vendor+model
-    char cdrom[128]; // user-defined path
-    char tmp_cdrom[128]; // tmp user-defined path
-    char* cddb_server_name;
-    char* format_albumdir;
-    char* format_music;
-    char* format_playlist;
-    char* music_dir;
-    char* server_name;
-    char* log_file;
+    char drive[SZENTRY]; // MANUAL, AUTO, DEFAULT, vendor+model
+    char cdrom[SZENTRY]; // user-defined path
+    char tmp_cdrom[SZENTRY]; // tmp user-defined path
+    char cddb_server_name[SZENTRY];
+    char format_albumdir[SZENTRY];
+    char format_music[SZENTRY];
+    char format_playlist[SZENTRY];
+    char music_dir[SZENTRY];
+    char server_name[SZENTRY];
+    char log_file[SZENTRY];
     int make_playlist;
     int rip_wav;
     int rip_mp3;
@@ -224,6 +233,7 @@ typedef struct _prefs {
     int do_log;
     int max_log_size;
     int cddb_port;
+    int cddb_nocache;
 } prefs;
 
 typedef struct _shared {
@@ -466,6 +476,7 @@ static int get_field(char *buf, char *filename, char *field, char **value)
     char *b = NULL;
     int l = 0;
     int end = 0;
+	int ret = 0;
 
     if(buf == NULL) return 0;
     if(filename == NULL) return 0;
@@ -509,12 +520,13 @@ static int get_field(char *buf, char *filename, char *field, char **value)
             if(p - s > PSIZE - 2) {
                 TRACERROR("[%s] param value of [%s] is too long (%d)",
 							filename, field, p-s+1);
-                return 0;
+				goto cleanup;
             }
             *value = g_malloc0(p-s+4);
             memset(*value, 0 , p-s+4);
             memcpy(*value, s, p-s);
-            return 1;
+            ret = 1;
+			goto cleanup;
         }
         if(end) {
             break;
@@ -522,7 +534,23 @@ static int get_field(char *buf, char *filename, char *field, char **value)
         p++;
     }
     TRACEWARN("[%s] param %s not found", filename, field);
-    return 0;
+cleanup:
+	g_free(b);
+    return ret;
+}
+
+static int get_field_as_szentry(char *buf, char *filename, char *field,
+							char szentry[SZENTRY])
+{
+	char *v = NULL;
+	int r = get_field(buf, filename, field, &v);
+	if(r) {
+		szcopy(szentry,v);
+	} else {
+		memset(szentry,0,SZENTRY);
+	}
+	g_free(v);
+	return r;
 }
 
 // reads an entire line from a file and turns it into a number
@@ -894,7 +922,11 @@ static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name)
 
 static GtkListStore *get_tracklist_store()
 {
-	return GTK_LIST_STORE(gtk_tree_view_get_model(LKP_TRACKLIST));
+	GtkTreeModel *model = gtk_tree_view_get_model(LKP_TRACKLIST);
+	if(!model)
+		g_warning("get_tracklist_store() failed !");
+
+	return GTK_LIST_STORE(model);
 }
 
 static void show_dialog(GtkMessageType type, GtkButtonsType btn, char *fmt, ...)
@@ -961,7 +993,7 @@ static GList *get_drives_to_open()
 	}
 	GList *l = g_data->drive_list;
 	if(!l || g_list_length(l) == 0) {
-		TRACEWARN("NO DRIVE LIST");
+		TRACEINFO("NO DRIVE LIST");
 		goto end;
 	}
 	if(strcmp(d,"AUTO")==0) {
@@ -983,7 +1015,7 @@ static GList *get_drives_to_open()
 
 end:
 	if(!r) {
-		TRACEWARN("NO DRIVE TO OPEN.");
+		TRACEINFO("NO DRIVE TO OPEN.");
 	} else {
 		//TRACEINFO("%d drives to open.", g_list_length(r));
 	}
@@ -1084,7 +1116,7 @@ static void eject_disc(char *cdrom)
 	if(!cdrom) return;
 	int fd = open(cdrom, O_RDONLY | O_NONBLOCK);
 	if (fd < 0) {
-		TRACEWARN("Couldn't open %s", cdrom);
+		TRACEWARN("Couldn't open '%s'", cdrom);
 		return;
 	}
 	ioctl(fd, CDROM_LOCKDOOR, 0);
@@ -1100,11 +1132,17 @@ static void eject_disc(char *cdrom)
 
 static gpointer cddb_thread_run(gpointer data)
 {
+	if (g_prefs->cddb_nocache) {
+		cddb_cache_disable(g_data->cddb_conn);
+	} else {
+		cddb_cache_enable(g_data->cddb_conn);
+	}
 	g_data->cddb_matches = cddb_query(g_data->cddb_conn, g_data->cddb_disc);
 	TRACEINFO("Got %d matches for CDDB QUERY.", g_data->cddb_matches);
 	if (g_data->cddb_matches == -1)
 		g_data->cddb_matches = 0;
 
+	// cddb_disc_print(g_data->cddb_disc);
 	g_atomic_int_set(&g_data->cddb_thread_running, 0);
 	return NULL;
 }
@@ -1142,7 +1180,7 @@ static GList *lookup_disc(cddb_disc_t *disc)
 			gtk_main_iteration();
 		Sleep(300);
 	}
-	gtk_label_set_text(status, "Query finished.");
+	gtk_label_set_text(status, "CDDB query finished.");
 	enable_all_main_widgets();
 	gdk_threads_leave();
 
@@ -1154,6 +1192,7 @@ static GList *lookup_disc(cddb_disc_t *disc)
 			cddb_error_print(cddb_errno(g_data->cddb_conn));
 			fatalError("cddb_read() failed.");
 		}
+		// cddb_disc_print(possible_match);
 		matches = g_list_append(matches, possible_match);
 
 		// move to next match
@@ -1170,7 +1209,7 @@ static cddb_disc_t *read_disc(char *cdrom)
 {
 	int fd = open(cdrom, O_RDONLY | O_NONBLOCK);
 	if (fd < 0) {
-		TRACEWARN("Couldn't open %s", cdrom);
+		TRACEWARN("Couldn't open '%s'", cdrom);
 		return NULL;
 	}
 	cddb_disc_t *disc = NULL;
@@ -1784,8 +1823,8 @@ static void create_completion(GtkWidget *entry, const char *name)
 	gtk_entry_completion_set_popup_set_width(compl, TRUE);
 	gtk_entry_completion_set_text_column(compl, 0);
 	gtk_entry_set_completion(GTK_ENTRY(entry), compl);
-	gchar *str = g_strdup(name);
-	g_object_set_data(G_OBJECT(entry), COMPLETION_NAME_KEY, str);
+	g_object_set_data_full(G_OBJECT(entry), COMPLETION_NAME_KEY,
+						g_strdup(name),(GDestroyNotify) g_free);
 	read_completion_file(list, name);
 }
 
@@ -2379,9 +2418,9 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(alignment);
 	gtk_container_add(GTK_CONTAINER(frame), alignment);
 	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-	vbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(alignment), vbox);
+	GtkWidget *wbox = gtk_vbox_new(FALSE, 0);
+	gtk_widget_show(wbox);
+	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	GtkWidget *rip_wav = gtk_check_button_new_with_mnemonic(
 													_("WAV (uncompressed)"));
@@ -2396,7 +2435,7 @@ static GtkWidget *create_prefs(void)
 
 	gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
 	gtk_widget_show(label);
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
+	BOXPACK(wbox, label, FALSE, FALSE, 0);
 	/* END WAV */
 
 	/* MP3 */
@@ -2526,6 +2565,11 @@ static GtkWidget *create_prefs(void)
 	gtk_tooltips_set_tip(tip, cddbPortNum,
 						_("The CDDB server port (default is 8880)"), NULL);
 
+	GtkWidget *cddb_nocache = gtk_check_button_new_with_label(
+											_("Disable CDDB local cache"));
+	gtk_widget_show(cddb_nocache);
+	BOXPACK(frameVbox, cddb_nocache, FALSE, FALSE, 0);
+
 	frame = gtk_frame_new(NULL);
 	gtk_widget_show(frame);
 	BOXPACK(vbox, frame, FALSE, FALSE, 0);
@@ -2599,6 +2643,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, serverName, "server_name");
 	HOOKUP(prefs, portNum, "port_number");
 	HOOKUP(prefs, log_file, "do_log");
+	HOOKUP(prefs, cddb_nocache, "cddb_nocache");
 	HOOKUP(prefs, music_dir, "music_dir");
 	HOOKUP(prefs, make_m3u, "make_playlist");
 	HOOKUP(prefs, cdrom, "cdrom");
@@ -2651,6 +2696,7 @@ static void disable_all_main_widgets(void)
 	disable_widget(WDG_ALBUM_GENRE);
 	disable_widget(WDG_ALBUM_TITLE);
 	disable_widget(WDG_ALBUM_YEAR);
+	disable_widget(WDG_PICK_DISC);
 }
 
 static void enable_all_main_widgets(void)
@@ -2669,6 +2715,7 @@ static void enable_all_main_widgets(void)
 	enable_widget(WDG_ALBUM_GENRE);
 	enable_widget(WDG_ALBUM_TITLE);
 	enable_widget(WDG_ALBUM_YEAR);
+	enable_widget(WDG_PICK_DISC);
 }
 
 static void disable_mp3_widgets(void)
@@ -2700,22 +2747,10 @@ static void show_completed_dialog(int numOk, int numFailed)
 	}
 }
 
-static void clear_prefs(prefs *p)
-{
-	STR_FREE(p->music_dir);
-	STR_FREE(p->format_music);
-	STR_FREE(p->format_playlist);
-	STR_FREE(p->format_albumdir);
-	STR_FREE(p->server_name);
-	STR_FREE(p->cddb_server_name);
-}
-
 // free memory allocated for prefs struct
 // also frees any strings pointed to in the struct
 static void free_prefs(prefs * p)
 {
-	STR_FREE(p->log_file);
-	clear_prefs(p);
 	g_free(p);
 }
 
@@ -2727,7 +2762,7 @@ static prefs *get_default_prefs()
 	p->do_cddb_updates = 1;
 	p->do_log = 0;
 	p->max_log_size = 5000; // kb
-	p->log_file = g_strdup(DEFAULT_LOG_FILE);
+	szcopy(p->log_file, DEFAULT_LOG_FILE);
 	p->eject_on_done = 0;
 	p->main_window_height = 380;
 	p->main_window_width = 520;
@@ -2739,15 +2774,18 @@ static prefs *get_default_prefs()
 	p->use_proxy = 0;
 	p->port_number = DEFAULT_PROXY_PORT;
 	p->cddb_port= DEFAULT_CDDB_SERVER_PORT;
-	p->music_dir = get_default_music_dir();
-	strcpy(p->cdrom, "/dev/cdrom");
-	strcpy(p->tmp_cdrom, p->cdrom);
-	strcpy(p->drive, "DEFAULT");
-	p->format_music = g_strdup("%N - %A - %T");
-	p->format_playlist = g_strdup("%A - %L");
-	p->format_albumdir = g_strdup("%A - %L - %Y");
-	p->server_name = g_strdup("10.0.0.1");
-	p->cddb_server_name = g_strdup(DEFAULT_CDDB_SERVER);
+	p->cddb_nocache= 0;
+	gchar *v = get_default_music_dir();
+	szcopy(p->music_dir, v);
+	g_free(v);
+	szcopy(p->cdrom, "/dev/cdrom");
+	szcopy(p->tmp_cdrom, p->cdrom);
+	szcopy(p->drive, "DEFAULT");
+	szcopy(p->format_music, "%N - %A - %T");
+	szcopy(p->format_playlist, "%A - %L");
+	szcopy(p->format_albumdir, "%A - %L - %Y");
+	szcopy(p->server_name, "10.0.0.1");
+	szcopy(p->cddb_server_name, DEFAULT_CDDB_SERVER);
 	return p;
 }
 
@@ -2797,6 +2835,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle("rip_mp3", p->rip_mp3);
 	set_pref_toggle("rip_wav", p->rip_wav);
 	set_pref_toggle("use_proxy", p->use_proxy);
+	set_pref_toggle("cddb_nocache", p->cddb_nocache);
 
 	gchar *num = g_strdup_printf("%d", p->port_number);
 	set_pref_text("port_number", num);
@@ -2837,12 +2876,6 @@ static void set_widgets_from_prefs(prefs *p)
 	if(!(p->rip_mp3)) disable_mp3_widgets();
 }
 
-static gchar* get_pref_text(char *widget_name)
-{
-	const gchar *s = GET_PREF_TEXT(widget_name);
-	return g_strdup(s);
-}
-
 static int get_pref_toggle(char *widget_name)
 {
 	return gtk_toggle_button_get_active(
@@ -2858,11 +2891,9 @@ static int get_main_toggle(char *widget_name)
 // populates a prefs struct from the current state of the widgets
 static void get_prefs_from_widgets(prefs *p)
 {
-	clear_prefs(p);
-
 	gchar *tocopy = gtk_file_chooser_get_filename(
-									GTK_FILE_CHOOSER(LKP_PREF("music_dir")));
-	p->music_dir = g_strdup(tocopy);
+						GTK_FILE_CHOOSER(LKP_PREF("music_dir")));
+	szcopy(p->music_dir, tocopy);
 	g_free(tocopy);
 	p->mp3_quality = gtk_combo_box_get_active(COMBO_MP3Q);
 
@@ -2886,11 +2917,11 @@ static void get_prefs_from_widgets(prefs *p)
 		g_free(model);
 	}
 	strcpy(p->cdrom,p->tmp_cdrom);
-	p->format_music = get_pref_text(WDG_FMT_MUSIC);
-	p->format_playlist = get_pref_text(WDG_FMT_PLAYLIST);
-	p->format_albumdir = get_pref_text(WDG_FMT_ALBUMDIR);
-	p->cddb_server_name = get_pref_text("cddb_server_name");
-	p->server_name = get_pref_text("server_name");
+	szcopy(p->format_music, GET_PREF_TEXT(WDG_FMT_MUSIC));
+	szcopy(p->format_playlist, GET_PREF_TEXT(WDG_FMT_PLAYLIST));
+	szcopy(p->format_albumdir, GET_PREF_TEXT(WDG_FMT_ALBUMDIR));
+	szcopy(p->cddb_server_name, GET_PREF_TEXT("cddb_server_name"));
+	szcopy(p->server_name, GET_PREF_TEXT("server_name"));
 	p->make_playlist = get_pref_toggle("make_playlist");
 	p->rip_wav = get_pref_toggle("rip_wav");
 	p->rip_mp3 = get_pref_toggle("rip_mp3");
@@ -2898,6 +2929,7 @@ static void get_prefs_from_widgets(prefs *p)
 	p->eject_on_done = get_pref_toggle("eject_on_done");
 	p->do_cddb_updates = get_pref_toggle("do_cddb_updates");
 	p->use_proxy = get_pref_toggle("use_proxy");
+	p->cddb_nocache = get_pref_toggle("cddb_nocache");
 	p->do_log = get_pref_toggle("do_log");
 	p->port_number = atoi(GET_PREF_TEXT("port_number"));
 	p->cddb_port= atoi(GET_PREF_TEXT("cddb_port"));
@@ -2981,6 +3013,7 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "MAX_LOG_SIZE=%d\n", p->max_log_size);
 	fprintf(fd, "CDDB_SERVER_NAME=%s\n", p->cddb_server_name);
 	fprintf(fd, "CDDB_PORT=%d\n", p->cddb_port);
+	fprintf(fd, "CDDB_NOCACHE=%d\n", p->cddb_nocache);
 	fclose(fd);
 	g_free(file);
 	TRACEINFO("Configuration saved.");
@@ -3029,7 +3062,7 @@ static void load_prefs()
 	g_free(v);
 	set_device_from_drive(p->drive);
 
-	get_field(s, file, "MUSIC_DIR", &(p->music_dir));
+	get_field_as_szentry(s, file, "MUSIC_DIR", p->music_dir);
 	get_field_as_long(s,file,"MAKE_PLAYLIST", &(p->make_playlist));
 	get_field_as_long(s,file,"RIP_WAV", &(p->rip_wav));
 	get_field_as_long(s,file,"RIP_MP3", &(p->rip_mp3));
@@ -3048,10 +3081,11 @@ static void load_prefs()
 
 	get_field_as_long(s,file,"DO_LOG", &(p->do_log));
 	get_field_as_long(s,file,"MAX_LOG_SIZE", &(p->max_log_size));
-	get_field(s, file, "LOG_FILE", &(p->log_file));
+	get_field_as_szentry(s, file, "LOG_FILE", p->log_file);
 	get_field_as_long(s,file,"EJECT", &(p->eject_on_done));
 	get_field_as_long(s,file,"CDDB_UPDATE", &(p->do_cddb_updates));
 	get_field_as_long(s,file,"USE_PROXY",&(p->use_proxy));
+	get_field_as_long(s,file,"CDDB_NOCACHE",&(p->cddb_nocache));
 	get_field_as_long(s,file,"PORT",&(p->port_number));
 	if (p->port_number == 0 || !is_valid_port_number(p->port_number)) {
 		printf("bad port number read from config file, using %d instead\n",
@@ -3064,11 +3098,11 @@ static void load_prefs()
 													DEFAULT_CDDB_SERVER_PORT);
 		p->cddb_port= DEFAULT_CDDB_SERVER_PORT;
 	}
-	get_field(s, file, "SERVER_NAME", &(p->server_name));
-	get_field(s, file, "CDDB_SERVER_NAME", &(p->cddb_server_name));
-	get_field(s, file, "FORMAT_MUSIC", &(p->format_music));
-	get_field(s, file, "FORMAT_PLAYLIST", &(p->format_playlist));
-	get_field(s, file, "FORMAT_ALBUMDIR", &(p->format_albumdir));
+	get_field_as_szentry(s, file, "SERVER_NAME", p->server_name);
+	get_field_as_szentry(s, file, "CDDB_SERVER_NAME", p->cddb_server_name);
+	get_field_as_szentry(s, file, "FORMAT_MUSIC", p->format_music);
+	get_field_as_szentry(s, file, "FORMAT_PLAYLIST", p->format_playlist);
+	get_field_as_szentry(s, file, "FORMAT_ALBUMDIR", p->format_albumdir);
 	if(buf) {
 		g_free(buf);
 	}
@@ -3086,8 +3120,8 @@ static char *prefs_get_music_dir(prefs *p)
 	gchar *newdir = get_default_music_dir();
 	DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\n"
 			"The music directory will be reset to '%s'.", p->music_dir, newdir);
-	g_free(p->music_dir);
-	p->music_dir = newdir;
+	szcopy(p->music_dir, newdir);
+	g_free(newdir);
 	save_prefs(p);
 	return p->music_dir;
 }
@@ -3229,7 +3263,7 @@ static void abort_threads()
 
 static void on_cancel_clicked(GtkButton *button, gpointer user_data)
 {
-	TRACEWARN("on_cancel_clicked !!");
+	TRACEINFO("on_cancel_clicked !!");
 	abort_threads();
 }
 
@@ -3398,6 +3432,7 @@ static gpointer rip_thread(gpointer data)
 							   COL_YEAR, &trackyear, -1);
 
 		if (single_artist) {
+			g_free(trackartist);
 			trackartist = g_strdup(albumartist);
 		}
 		if (riptrack) {
@@ -3965,6 +4000,7 @@ int main(int argc, char *argv[])
 	bind_textdomain_codeset(PACKAGE, UTF8);
 	textdomain(PACKAGE);
 #endif
+	// cddb_log_set_level(CDDB_LOG_DEBUG);
 	g_thread_init(NULL);
 	gdk_threads_init();
 	gtk_init(&argc, &argv);
@@ -3980,6 +4016,7 @@ int main(int argc, char *argv[])
 	free_prefs(g_prefs);
 	log_end();
 	g_free(g_data);
+	libcddb_shutdown();
 	return 0;
 }
 

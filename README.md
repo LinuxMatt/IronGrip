@@ -54,6 +54,7 @@ To compile the source, you may also need the -dev or -devel version of GTK+.
 On Ubuntu, this package is called libgtk2.0-dev.
 - sudo apt-get install automake
 - sudo apt-get install intltool
+- sudo apt-get install build-essential
 - sudo apt-get install libgtk2.0-dev
 
 Compiling

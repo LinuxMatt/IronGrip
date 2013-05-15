@@ -1343,6 +1343,14 @@ static GList* get_cdrom_info(char *str)
 	return matches;
 }
 
+#if ! GLIB_CHECK_VERSION(2,28,0)
+static void g_list_free_full(GList *list, GDestroyNotify free_func)
+{
+	g_list_foreach(list, (GFunc) free_func, NULL);
+	g_list_free(list);
+}
+#endif
+
 static bool seek_cdrom()
 {
 	const char* cdinfo = "/proc/sys/dev/cdrom/info";

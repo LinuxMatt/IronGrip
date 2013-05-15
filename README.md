@@ -55,6 +55,8 @@ On Ubuntu, this package is called libgtk2.0-dev.
 - sudo apt-get install automake
 - sudo apt-get install intltool
 - sudo apt-get install build-essential
+- sudo apt-get install fakeroot
+- sudo apt-get install dh-make
 - sudo apt-get install libgtk2.0-dev
 
 Compiling

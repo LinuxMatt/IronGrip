@@ -45,8 +45,8 @@ The following distributions are used for developing IronGrip:
 Binary packages
 ---------------
 You can download a 32-bit debian package on http://sourceforge.net/projects/irongrip/.
-It is compatible with Ubuntu 10.04 and above.
-It should work also on Debian 6 and above.
+- It is compatible with Ubuntu 10.04 and above.
+- It should work also on Debian 6 and above.
 
 Installing requirements in Ubuntu and Debian
 --------------------------------------------

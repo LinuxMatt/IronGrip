@@ -17,8 +17,8 @@ Features
 Requirements
 ------------
 - Linux
-- GTK+ 2.8 or greater
-- Glib 2.10 or greater
+- GTK+ 2.12 or greater
+- Glib 2.16 or greater
 - Libcddb 1.3.2 source code is included.
   http://libcddb.sourceforge.net/
 - Cdparanoia (for Audio CD ripping).
@@ -38,11 +38,18 @@ Test systems
 ------------
 The following distributions are used for developing IronGrip:
 - Ubuntu 8.04.4 LTS (32 bit)
+- Ubuntu 10.04.4 LTS (32 bit), used also for creating packages.
 - Ubuntu 12.04 LTS (32 bit) on ASUS eeePC 900
 - Linux Mint 13 LTS (64 bit)
 
-Installing requirements in Ubuntu
----------------------------------
+Binary packages
+---------------
+You can download a 32-bit debian package on http://sourceforge.net/projects/irongrip/.
+It is compatible with Ubuntu 10.04 and above.
+It should work also on Debian 6 and above.
+
+Installing requirements in Ubuntu and Debian
+--------------------------------------------
 To install Cdparanoia and Lame from a terminal, type the following commands:
 - sudo apt-get install cdparanoia
 - sudo apt-get install lame

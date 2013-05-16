@@ -51,13 +51,11 @@ Build dependencies
 ------------------
 First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...).
 To compile the source, you may also need the -dev or -devel version of GTK+.
-On Ubuntu, this package is called libgtk2.0-dev.
-- sudo apt-get install automake
-- sudo apt-get install intltool
-- sudo apt-get install build-essential
-- sudo apt-get install fakeroot
+
+On Ubuntu, you can just run the following commands to install all requirements:
 - sudo apt-get install dh-make
 - sudo apt-get install libgtk2.0-dev
+- sudo apt-get install intltool
 
 Compiling
 ---------

@@ -39,6 +39,7 @@
 #include <fcntl.h>
 #include <gdk/gdkkeysyms.h>
 #include <glib.h>
+#include <glib/gprintf.h>
 #include <gtk/gtk.h>
 #include <libgen.h>
 #include <limits.h>
@@ -306,6 +307,7 @@ static void get_prefs_from_widgets(prefs *p);
 static void on_cancel_clicked(GtkButton *button, gpointer user_data);
 static void save_prefs(prefs *p);
 static void set_status(char *text);
+static void fmt_status(const char *fmt, ...);
 static void set_widgets_from_prefs(prefs *p);
 static void sigchld();
 
@@ -533,7 +535,7 @@ static int get_field(char *buf, char *filename, char *field, char **value)
         }
         p++;
     }
-    TRACEWARN("[%s] param %s not found", filename, field);
+    TRACEINFO("[%s] param %s not found", filename, field);
 cleanup:
 	g_free(b);
     return ret;
@@ -546,8 +548,6 @@ static int get_field_as_szentry(char *buf, char *filename, char *field,
 	int r = get_field(buf, filename, field, &v);
 	if(r) {
 		szcopy(szentry,v);
-	} else {
-		memset(szentry,0,SZENTRY);
 	}
 	g_free(v);
 	return r;
@@ -569,7 +569,7 @@ static long get_field_as_long(char *buf, char *file, char *field, int *value)
 {
 	char *num = NULL;
 	if(!get_field(buf, file, field, &num)) {
-		TRACEWARN("missing field %s", field);
+		TRACEINFO("missing field %s", field);
 		return 0;
 	}
 	long ret = -1;
@@ -1121,13 +1121,15 @@ static void eject_disc(char *cdrom)
 	}
 	ioctl(fd, CDROM_LOCKDOOR, 0);
 	int eject = ioctl(fd, CDROMEJECT, 0 /* CDSL_CURRENT */);
-	if(eject < 0) {
-		// perror("ioctl");
-		TRACEINFO("Eject returned %d", eject);
-		// TODO: use '/usr/bin/eject' on ubuntu because
-		//			 ioctl seems to work only as root
-	}
 	close(fd);
+	if(eject >= 0) return;
+	// perror("ioctl");
+	TRACEINFO("Eject returned %d", eject);
+
+	// use '/usr/bin/eject' on ubuntu because ioctl seems to work only as root
+	gchar cmd[SZENTRY];
+	snprintf(cmd, SZENTRY, "/usr/bin/eject %s", cdrom);
+	g_spawn_command_line_async(cmd, NULL);
 }
 
 static gpointer cddb_thread_run(gpointer data)
@@ -2782,7 +2784,7 @@ static prefs *get_default_prefs()
 	p->use_proxy = 0;
 	p->port_number = DEFAULT_PROXY_PORT;
 	p->cddb_port= DEFAULT_CDDB_SERVER_PORT;
-	p->cddb_nocache= 0;
+	p->cddb_nocache= 1;
 	gchar *v = get_default_music_dir();
 	szcopy(p->music_dir, v);
 	g_free(v);
@@ -2830,8 +2832,9 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_text(WDG_FMT_PLAYLIST, p->format_playlist);
 	set_pref_text("server_name", p->server_name);
 
+	prefs_get_music_dir(p);
 	gtk_file_chooser_set_current_folder(
-			GTK_FILE_CHOOSER(LKP_PREF("music_dir")), prefs_get_music_dir(p));
+			GTK_FILE_CHOOSER(LKP_PREF("music_dir")), p->music_dir);
 
 	gtk_combo_box_set_active(COMBO_MP3Q, p->mp3_quality);
 
@@ -2943,43 +2946,32 @@ static void get_prefs_from_widgets(prefs *p)
 	p->cddb_port= atoi(GET_PREF_TEXT("cddb_port"));
 }
 
-static bool create_directory(gchar *path)
-{
-	if(!is_directory(path)) {
-		mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
-		int rc = mkdir(path, mode);
-		if(rc != 0 && errno != EEXIST) {
-			return FALSE;
-		}
+static bool mkdir_p(char *path) {
+	if(is_directory(path)) return TRUE;
+	if(g_file_test(path, G_FILE_TEST_IS_REGULAR)) return FALSE;
+	mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
+	int rc = g_mkdir_with_parents(path, mode);
+	if(rc != 0 && errno != EEXIST) {
+		perror("g_mkdir_with_parents");
+		return FALSE;
 	}
 	return TRUE;
 }
 
 static gchar* get_config_path(const gchar *file_suffix)
 {
-	// TODO get a config file path, using XDG_CONFIG_HOME if available
-	// TODO fix allocation scheme
-
-	const gchar *home = g_getenv("HOME");
-	gchar *path = NULL;
-
-	path = g_strdup_printf("%s/.config", home);
-	if(!create_directory(path)) {
-		g_free(path);
-		return NULL;
-	}
-	g_free(path);
-	path = g_strdup_printf("%s/.config/%s", home, PACKAGE);
-	if(!create_directory(path)) {
-		g_free(path);
-		return NULL;
-	}
 	gchar *filename = NULL;
+	const gchar *home = g_getenv("HOME");
+	gchar *path = g_strdup_printf("%s/.config/%s", home, PACKAGE);
+	if(!mkdir_p(path)) {
+		goto cleanup;
+	}
 	if(file_suffix == NULL) {
 		filename = g_strdup_printf("%s/%s.conf", path, PACKAGE);
 	} else {
 		filename = g_strdup_printf("%s/%s.%s", path, PACKAGE, file_suffix);
 	}
+cleanup:
 	g_free(path);
 	return filename;
 }
@@ -3059,16 +3051,12 @@ static void load_prefs()
 		return;
 	}
 	s = buf; // Start of HEADER section
-	char *v = NULL;
-	if(get_field(s, file, "DEVICE", &v)) {
-		strcpy(p->cdrom, v);
-		strcpy(p->tmp_cdrom, v);
-	}
-	g_free(v);
-	get_field(s, file, "DRIVE", &v);
-	strcpy(p->drive, v);
-	g_free(v);
-	set_device_from_drive(p->drive);
+
+	if(get_field_as_szentry(s, file, "DEVICE", p->cdrom))
+		szcopy(p->tmp_cdrom, p->cdrom);
+
+	if(get_field_as_szentry(s, file, "DRIVE", p->drive))
+		set_device_from_drive(p->drive);
 
 	get_field_as_szentry(s, file, "MUSIC_DIR", p->music_dir);
 	get_field_as_long(s,file,"MAKE_PLAYLIST", &(p->make_playlist));
@@ -3126,9 +3114,12 @@ static char *prefs_get_music_dir(prefs *p)
 		return p->music_dir;
 	}
 	gchar *newdir = get_default_music_dir();
-	DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\n"
-			"The music directory will be reset to '%s'.", p->music_dir, newdir);
-	szcopy(p->music_dir, newdir);
+	if(strcmp(newdir,p->music_dir)) {
+		DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\n"
+				"The music directory will be reset to '%s'.", p->music_dir, newdir);
+		szcopy(p->music_dir, newdir);
+	}
+	mkdir_p(newdir);
 	g_free(newdir);
 	save_prefs(p);
 	return p->music_dir;
@@ -3392,8 +3383,7 @@ static void rip_track(int tracknum, const char *trackartist,
 
 	char *wavfilename = make_filename(prefs_get_music_dir(g_prefs), albumdir,
 														musicfilename, "wav");
-
-	// TODO: set_status("Ripping track %d to \"%s\"\n", tracknum, wavfilename);
+	fmt_status("Ripping track %d ...", tracknum);
 
 	if (g_data->aborted) g_thread_exit(NULL);
 	struct stat statStruct;
@@ -3458,7 +3448,7 @@ static gpointer rip_thread(gpointer data)
 	}
 	// no more tracks to rip, safe to eject
 	if (g_prefs->eject_on_done) {
-		set_status("Trying to eject disc...");
+		fmt_status("Trying to eject disc in '%s'...", g_data->device);
 		eject_disc(g_data->device);
 	}
 	return NULL;
@@ -3468,6 +3458,16 @@ static void set_status(char *text) {
 	GtkWidget *s = LKP_MAIN(WDG_STATUS);
 	gtk_label_set_text(GTK_LABEL(s), _(text));
 	gtk_label_set_use_markup(GTK_LABEL(s), TRUE);
+}
+
+static void fmt_status(const char *fmt, ...) {
+	gchar *str = NULL;
+	va_list args;
+	va_start(args,fmt);
+	g_vasprintf(&str, fmt, args);
+	va_end(args);
+	set_status(str);
+	g_free(str);
 }
 
 static void reset_counters()

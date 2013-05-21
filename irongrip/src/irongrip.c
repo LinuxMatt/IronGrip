@@ -2859,6 +2859,7 @@ static void set_widgets_from_prefs(prefs *p)
 
 	GList *cmb = MakeDriveCombo();
 	GtkListStore *store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+	gtk_combo_box_set_model(COMBO_DRIVE, GTK_TREE_MODEL(store));
 	GtkTreeIter iter;
 	int active = 0;
 	int i = 0;
@@ -2881,7 +2882,6 @@ static void set_widgets_from_prefs(prefs *p)
 		}
 		gtk_combo_box_set_active(COMBO_DRIVE, active);
 	}
-	gtk_combo_box_set_model(COMBO_DRIVE, GTK_TREE_MODEL(store));
 	g_list_free_full(cmb, free_drive);
 	// disable mp3 widgets if needed
 	if(!(p->rip_mp3)) disable_mp3_widgets();

@@ -3,9 +3,8 @@ TODO
 
 Higher priority:
 ----------------
-* make binary .deb packages for Ubuntu LTS versions.
 * .cddbslave multiple matches not working (maybe a bug in libcddb)
-* 'eject disc' doesn't work on Ubuntu, try "/usr/bin/eject".
+* when cdrom drive is changed in preferences, scan again asap
 
 Normal priority:
 ---------------

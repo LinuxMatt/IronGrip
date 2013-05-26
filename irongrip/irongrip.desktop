@@ -3,12 +3,13 @@ Name=IronGrip
 Name[fr]=IronGrip
 GenericName=Audio CD Ripper
 GenericName[fr]=Extracteur de CD Audio
-Comment=An application to save tracks from an Audio CD as WAV and/or MP3.
-Comment[fr]=Logiciel pour enregistrer les pistes d'un CD Audio en MP3 ou WAV.
+Comment=Save tracks from an Audio CD as WAV and/or MP3
+Comment[fr]=Enregistrer les pistes d'un CD Audio en MP3 ou WAV
 Exec=irongrip
 Terminal=false
 StartupNotify=true
 Type=Application
 Categories=AudioVideo;Audio;
 Icon=irongrip
+MimeType=x-content/audio-cdda;
 

@@ -1162,6 +1162,11 @@ static GList *lookup_disc(cddb_disc_t *disc)
 		cddb_set_http_proxy_server_port(g_data->cddb_conn, g_prefs->port_number);
 		cddb_http_proxy_enable(g_data->cddb_conn);
 	}
+
+	// Patch from Asunder 2.3: use HTTP when port is 80 (for MusicBrainz).
+	if (g_prefs->cddb_port== 80)
+		cddb_http_enable(g_data->cddb_conn);
+
 	// query cddb to find similar discs
 	g_atomic_int_set(&g_data->cddb_thread_running, 1);
 	g_data->cddb_disc = disc;

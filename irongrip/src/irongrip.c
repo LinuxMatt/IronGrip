@@ -683,6 +683,44 @@ static char *make_filename(const char *path, const char *dir, const char *file,
 	return ret;
 }
 
+// Based on a patch written by Jens Peter Secher <jps@debian.org>
+// for Debian's Asunder 2.2 package.
+// Make all letters lowercase and replace anything but letters,
+// digits, and dashes with underscores.
+static void string_simplify(char *str, int len)
+{
+	int c = 0;
+    for (int i = 0; i < len; i++) {
+        c = tolower(str[i]);
+        if (!( (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) {
+			c = '_';
+		}
+        str[i] = c;
+    }
+}
+
+static unsigned int simplify_shift(const char *label, char *dest)
+{
+	if (!label) return 0;
+	unsigned int l = strlen(label);
+	strncpy(dest, label, l);
+	string_simplify(dest, l);
+	return l;
+}
+
+static unsigned int strlen_shift(const char *str)
+{
+	if(!str) return 0;
+	return strlen(str);
+}
+
+static unsigned int copy_shift(const char* src, char *dst)
+{
+	if (!src) return 0;
+	strcpy(dst, src);
+	return strlen(src);
+}
+
 // substitute various items into a formatted string (similar to printf)
 //
 // format - the format of the filename
@@ -699,31 +737,38 @@ static char *parse_format(const char *format, int tracknum, const char *year,
 {
 	unsigned i = 0;
 	int len = 0;
+	unsigned int format_len = strlen(format);
 
-	for (i = 0; i < strlen(format); i++) {
-		if ((format[i] == '%') && (i + 1 < strlen(format))) {
-			switch (format[i + 1]) {
-			case 'A':
-				if (artist) len += strlen(artist);
-				break;
-			case 'L':
-				if (album) len += strlen(album);
-				break;
-			case 'N':
-				if ((tracknum > 0) && (tracknum < 100)) len += 2;
-				break;
-			case 'Y':
-				if (year) len += strlen(year);
-				break;
-			case 'T':
-				if (title) len += strlen(title);
-				break;
-			case 'G':
-				if (genre) len += strlen(genre);
-				break;
-			case '%':
-				len += 1;
-				break;
+	for (i = 0; i < format_len; i++) {
+		if ((format[i] == '%') && (i+1 < format_len)) {
+			switch (format[i+1]) {
+				case 'a':
+				case 'A':
+					len += strlen_shift(artist);
+					break;
+				case 'l':
+				case 'L':
+					len += strlen_shift(album);
+					break;
+				case 'n':
+				case 'N':
+					if ((tracknum > 0) && (tracknum < 100)) len += 2;
+					break;
+				case 'y':
+				case 'Y':
+					len += strlen_shift(year);
+					break;
+				case 't':
+				case 'T':
+					len += strlen_shift(title);
+					break;
+				case 'g':
+				case 'G':
+					len += strlen_shift(genre);
+					break;
+				case '%':
+					len++;
+					break;
 			}
 			i++;	// skip the character after the %
 		} else {
@@ -731,58 +776,54 @@ static char *parse_format(const char *format, int tracknum, const char *year,
 		}
 	}
 	char *ret = g_malloc0(sizeof(char) * (len + 1));
-	int pos = 0;
-	for (i = 0; i < strlen(format); i++) {
-		if ((format[i] == '%') && (i + 1 < strlen(format))) {
-			switch (format[i + 1]) {
-			case 'A':
-				if (artist) {
-					strncpy(&ret[pos], artist, strlen(artist));
-					pos += strlen(artist);
-				}
-				break;
-			case 'L':
-				if (album) {
-					strncpy(&ret[pos], album, strlen(album));
-					pos += strlen(album);
-				}
-				break;
-			case 'N':
-				if ((tracknum > 0) && (tracknum < 100)) {
-					ret[pos] = '0' + ((int)tracknum / 10);
-					ret[pos + 1] = '0' + (tracknum % 10);
-					pos += 2;
-				}
-				break;
-			case 'Y':
-				if (year) {
-					strncpy(&ret[pos], year, strlen(year));
-					pos += strlen(year);
-				}
-				break;
-			case 'T':
-				if (title) {
-					strncpy(&ret[pos], title, strlen(title));
-					pos += strlen(title);
-				}
-				break;
-			case 'G':
-				if (genre) {
-					strncpy(&ret[pos], genre, strlen(genre));
-					pos += strlen(genre);
-				}
-				break;
-			case '%':
-				ret[pos] = '%';
-				pos += 1;
+	char *p = ret;
+	for (i = 0; i < format_len; i++) {
+		if ((format[i] == '%') && (i + 1 < format_len)) {
+			switch (format[i+1]) {
+				case 'a':
+					p += simplify_shift(artist, p);
+					break;
+				case 'A':
+					p += copy_shift(artist, p);
+					break;
+				case 'l':
+					p += simplify_shift(album, p);
+					break;
+				case 'L':
+					p += copy_shift(album, p);
+					break;
+				case 'N':
+					if ((tracknum > 0) && (tracknum < 100)) {
+						*p = '0' + ((int)tracknum / 10); p++;
+						*p = '0' + (tracknum % 10); p++;
+					}
+					break;
+				case 'Y':
+					p += copy_shift(year, p);
+					break;
+				case 't':
+					p += simplify_shift(title, p);
+					break;
+				case 'T':
+					p += copy_shift(title, p);
+					break;
+				case 'g':
+					p += simplify_shift(genre, p);
+					break;
+				case 'G':
+					p += copy_shift(genre, p);
+					break;
+				case '%':
+					*p = '%';
+					p++;
 			}
 			i++;	// skip the character after the %
 		} else {
-			ret[pos] = format[i];
-			pos++;
+			*p = format[i];
+			p++;
 		}
 	}
-	ret[pos] = '\0';
+	*p = '\0';
 	return ret;
 }
 
@@ -2406,6 +2447,11 @@ static GtkWidget *create_prefs(void)
 							_("This will be stored in the album directory.\n"
 							"Cannot be blank.\n" "Default: %A - %T\n"
 							"Other example: %N - %T"), NULL);
+
+	label = gtk_label_new(_("\nTip: use lowercase letters for simplified names."));
+	gtk_widget_show(label);
+	BOXPACK(vbox, label, FALSE, FALSE, 0);
+	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
 
 	label = gtk_label_new(_("Filename formats"));
 	gtk_widget_show(label);

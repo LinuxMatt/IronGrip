@@ -88,10 +88,8 @@
 #define COMPLETION_MAX 4000
 #define COMPLETION_NAME_KEY "completion_name"
 
-// LNR - It's possible that some files may end up on a MS file system,
-// so it's best to disallow MS invalid chars as well. I also disallow
-// period (dot) because it screws up my file name database software. YMMV
-#define	BADCHARS	"./?*|><:\"\\"
+// Characters that should not be present in filenames.
+#define	BADCHARS	"/?*|><:\"\\"
 
 #define UTF8 "UTF-8"
 #define STR_UNKNOWN "unknown"

@@ -2,17 +2,25 @@ IronGrip
 ========
 Graphical frontend for Audio CD ripping and encoding
 
-**In beta stage, this project still needs testing, please report bugs**.
-
-Homepage
---------
-https://github.com/LinuxMatt/IronGrip
-
 Features
 --------
 - Supports WAV and MP3 encoding
 - Uses CDDB
 - Finds cdrom drives
+
+Binary packages
+---------------
+You can download debian packages at http://sourceforge.net/projects/irongrip/.
+- They are compatible with Ubuntu 10.04 and above.
+- They are compatible with Linux Mint 9 and above.
+- They should also work on Debian 6 and above.
+
+Help, bugs, suggestions and feedback
+------------------------------------
+- Send an e-mail to <matt59491@gmail.com>
+- Open an issue at https://github.com/LinuxMatt/IronGrip/issues
+
+This project is still young, it *needs your feedback* ;)
 
 Requirements
 ------------
@@ -26,28 +34,6 @@ Requirements
 - LAME (for MP3 support).
   http://lame.sourceforge.net/
 
-Supported systems
------------------
-The following distributions are expected to work with IronGrip:
-- Ubuntu 8.04 LTS and above (32bit and 64bit)
-- Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
-- All Linux distributions with the above requirements (not tested)
-- Compilation under Ubuntu 6.06 LTS is possible with some manual tweaking.
-
-Test systems
-------------
-The following distributions are used for developing IronGrip:
-- Ubuntu 8.04.4 LTS (32 bit)
-- Ubuntu 10.04.4 LTS (32 bit), used also for creating packages.
-- Ubuntu 12.04 LTS (32 bit) on ASUS eeePC 900
-- Linux Mint 13 LTS (64 bit)
-
-Binary packages
----------------
-You can download a 32-bit debian package on http://sourceforge.net/projects/irongrip/.
-- It is compatible with Ubuntu 10.04 and above.
-- It should work also on Debian 6 and above.
-
 Installing requirements in Ubuntu and Debian
 --------------------------------------------
 To install Cdparanoia and Lame from a terminal, type the following commands:
@@ -57,7 +43,7 @@ To install Cdparanoia and Lame from a terminal, type the following commands:
 Build dependencies
 ------------------
 First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...).
-To compile the source, you may also need the -dev or -devel version of GTK+.
+To compile the sources, you may also need the -dev or -devel version of GTK+.
 
 On Ubuntu, you can just run the following commands to install all requirements:
 - sudo apt-get install dh-make
@@ -67,11 +53,30 @@ On Ubuntu, you can just run the following commands to install all requirements:
 Compiling
 ---------
 First, you should install all the build dependencies.
-Then run:
-./maintainer-build.sh build
+Then, from the top directory, run:
+./easy-make.sh build
 
 If you get errors, it's probably a missing GNU tool or dependency.
-You can run the compiled program from the 'src' directory.
+You can run the compiled program from the 'src' subdirectory.
+
+Supported systems
+-----------------
+The following distributions are expected to work with IronGrip:
+- Ubuntu 8.04 LTS and above (32bit and 64bit)
+- Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
+- All Linux distributions with the above requirements (not tested yet)
+
+Test systems
+------------
+The following distributions are used for developing IronGrip:
+- Ubuntu 8.04.4 LTS
+- Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages.
+- Ubuntu 12.04 LTS / Linux Mint 13 LTS
+- Ubuntu 13.04 / Linux Mint 15
+
+Homepage
+--------
+https://github.com/LinuxMatt/IronGrip
 
 History
 -------

@@ -2882,8 +2882,10 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_text("server_name", p->server_name);
 
 	prefs_get_music_dir(p);
-	gtk_file_chooser_set_current_folder(
-			GTK_FILE_CHOOSER(LKP_PREF("music_dir")), p->music_dir);
+	GtkFileChooser *chooser = GTK_FILE_CHOOSER(LKP_PREF("music_dir"));
+	gtk_file_chooser_set_local_only (chooser, true);
+	gtk_file_chooser_set_uri(chooser, p->music_dir);
+	gtk_file_chooser_set_current_folder(chooser, p->music_dir);
 
 	gtk_combo_box_set_active(COMBO_MP3Q, p->mp3_quality);
 

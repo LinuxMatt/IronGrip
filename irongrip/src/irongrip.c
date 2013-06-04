@@ -130,6 +130,7 @@
 #define WDG_LBL_ARTIST "artist_label"
 #define WDG_LBL_ALBUMTITLE "albumtitle_label"
 #define WDG_LBL_GENRE "genre_label"
+#define WDG_MUSIC_DIR "music_dir"
 
 #define STR_FREE(x) g_free(x);x=NULL
 #define Sleep(x) usleep(x*1000)
@@ -1666,6 +1667,27 @@ static void on_pick_disc_changed(GtkComboBox *combobox, gpointer user_data)
 	update_tracklist(disc);
 }
 
+// TODO: select handwritten folder
+static void on_folder_clicked(GtkButton *button, gpointer user_data)
+{
+	GtkWidget *dlg = gtk_file_chooser_dialog_new(
+									_("Choose a destination folder"),
+									GTK_WINDOW(win_prefs),
+									GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+									GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+									GTK_STOCK_OPEN, GTK_RESPONSE_ACCEPT,
+									NULL);
+
+	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dlg);
+	gtk_file_chooser_set_current_folder(chooser, g_prefs->music_dir);
+	if (gtk_dialog_run(GTK_DIALOG(chooser)) == GTK_RESPONSE_ACCEPT) {
+		gchar *folder_path = gtk_file_chooser_get_filename(chooser);
+		gtk_entry_set_text(GTK_ENTRY(LKP_PREF(WDG_MUSIC_DIR)), folder_path);
+		g_free(folder_path);
+	}
+	gtk_widget_destroy (dlg);
+}
+
 static void on_preferences_clicked(GtkToolButton *button, gpointer user_data)
 {
 	gtk_widget_show(win_prefs);
@@ -2032,8 +2054,8 @@ static GtkWidget *create_main(void)
 	GtkWidget *icon = gtk_image_new_from_stock(GTK_STOCK_REFRESH, icon_size);
 	gtk_widget_show(icon);
 	GtkWidget *lookup = (pWdg) gtk_tool_button_new(icon, _("CDDB Lookup"));
-	GtkTooltips *tooltips = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tooltips, lookup,
+	GtkTooltips *tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, lookup,
 		_("Look up into the CDDB for information about this audio disc"), NULL);
 	gtk_widget_show(lookup);
 	gtk_container_add(GTK_CONTAINER(toolbar), lookup);
@@ -2310,10 +2332,21 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
-	GtkWidget *music_dir = gtk_file_chooser_button_new(_("Destination folder"),
-										GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
-	gtk_widget_show(music_dir);
-	BOXPACK(vbox, music_dir, FALSE, FALSE, 0);
+
+	GtkWidget *hbox = gtk_hbox_new(FALSE, 3);
+	gtk_widget_show(hbox);
+	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
+	GtkWidget *music_folder = gtk_entry_new();
+	gtk_widget_show(music_folder);
+	BOXPACK(hbox, music_folder, TRUE, TRUE, 0);
+
+	GtkWidget *folder_btn =  gtk_button_new_with_label(" ... ");
+	gtk_widget_show(folder_btn);
+	GtkTooltips *tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, folder_btn, _("Choose another folder"), NULL);
+
+	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
+	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
 
 	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
 													_("Create M3U playlist"));
@@ -2321,7 +2354,7 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(vbox, make_m3u, FALSE, FALSE, 0);
 
 	/* CDROM drives */
-	GtkWidget *hbox = gtk_hbox_new(FALSE, 0);
+	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox);
 	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
 	label = gtk_label_new(_("CD-ROM drives: "));
@@ -2350,7 +2383,7 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(cdrom);
 	gtk_widget_set_sensitive(cdrom, FALSE);
 	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
-	GtkTooltips *tip = gtk_tooltips_new();
+	tip = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tip, cdrom, _("Default: /dev/cdrom\n"
 			"Other example: /dev/hdc\n" "Other example: /dev/sr0"), NULL);
 	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
@@ -2703,7 +2736,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, portNum, "port_number");
 	HOOKUP(prefs, log_file, "do_log");
 	HOOKUP(prefs, cddb_nocache, "cddb_nocache");
-	HOOKUP(prefs, music_dir, "music_dir");
+	HOOKUP(prefs, music_folder, WDG_MUSIC_DIR);
 	HOOKUP(prefs, make_m3u, "make_playlist");
 	HOOKUP(prefs, cdrom, "cdrom");
 	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
@@ -2882,10 +2915,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_text("server_name", p->server_name);
 
 	prefs_get_music_dir(p);
-	GtkFileChooser *chooser = GTK_FILE_CHOOSER(LKP_PREF("music_dir"));
-	gtk_file_chooser_set_local_only (chooser, true);
-	gtk_file_chooser_set_uri(chooser, p->music_dir);
-	gtk_file_chooser_set_current_folder(chooser, p->music_dir);
+	set_pref_text(WDG_MUSIC_DIR, p->music_dir);
 
 	gtk_combo_box_set_active(COMBO_MP3Q, p->mp3_quality);
 
@@ -2953,12 +2983,6 @@ static int get_main_toggle(char *widget_name)
 // populates a prefs struct from the current state of the widgets
 static void get_prefs_from_widgets(prefs *p)
 {
-	gchar *tocopy = gtk_file_chooser_get_filename(
-						GTK_FILE_CHOOSER(LKP_PREF("music_dir")));
-	szcopy(p->music_dir, tocopy);
-	g_free(tocopy);
-	p->mp3_quality = gtk_combo_box_get_active(COMBO_MP3Q);
-
 	GtkTreeModel *m = gtk_combo_box_get_model(COMBO_DRIVE);
 	GtkTreeIter iter;
 	gchar *device = NULL;
@@ -2979,11 +3003,13 @@ static void get_prefs_from_widgets(prefs *p)
 		g_free(model);
 	}
 	strcpy(p->cdrom,p->tmp_cdrom);
+	szcopy(p->music_dir, GET_PREF_TEXT(WDG_MUSIC_DIR));
 	szcopy(p->format_music, GET_PREF_TEXT(WDG_FMT_MUSIC));
 	szcopy(p->format_playlist, GET_PREF_TEXT(WDG_FMT_PLAYLIST));
 	szcopy(p->format_albumdir, GET_PREF_TEXT(WDG_FMT_ALBUMDIR));
 	szcopy(p->cddb_server_name, GET_PREF_TEXT("cddb_server_name"));
 	szcopy(p->server_name, GET_PREF_TEXT("server_name"));
+	p->mp3_quality = gtk_combo_box_get_active(COMBO_MP3Q);
 	p->make_playlist = get_pref_toggle("make_playlist");
 	p->rip_wav = get_pref_toggle("rip_wav");
 	p->rip_mp3 = get_pref_toggle("rip_mp3");

@@ -11,12 +11,12 @@ Package: irongrip
 Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}, cdparanoia
 Recommends: audacious
-Suggests: lame
+Suggests: lame, flac
 Description: graphical audio CD ripper and encoder
  IronGrip is a graphical Audio CD ripper and encoder. It can be used to
  save tracks from Audio CDs. Main features:
  .
-  * Supports WAV and MP3
+  * Supports WAV, MP3 and FLAC encoding
   * Uses CDDB to name and tag each track
   * Can encode to multiple formats in one session
   * Can find and scan all cdrom drives

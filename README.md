@@ -4,7 +4,7 @@ Graphical frontend for Audio CD ripping and encoding
 
 Features
 --------
-- Supports WAV and MP3 encoding
+- Supports WAV, MP3 and FLAC encoding
 - Uses CDDB
 - Finds cdrom drives
 
@@ -33,12 +33,15 @@ Requirements
   http://www.xiph.org/paranoia/
 - LAME (for MP3 support).
   http://lame.sourceforge.net/
+- FLAC (for FLAC encoding).
+  http://flac.sourceforge.net/
 
 Installing requirements in Ubuntu and Debian
 --------------------------------------------
 To install Cdparanoia and Lame from a terminal, type the following commands:
 - sudo apt-get install cdparanoia
 - sudo apt-get install lame
+- sudo apt-get install flac
 
 Build dependencies
 ------------------

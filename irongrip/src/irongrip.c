@@ -97,6 +97,7 @@
 #define PIXMAP_PATH  PACKAGE_DATA_DIR "/" PIXMAPDIR
 #define DEFAULT_LOG_FILE "/tmp/irongrip.log"
 #define LAME_PRG "lame"
+#define FLAC_PRG "flac"
 #define CDPARANOIA_PRG "cdparanoia"
 
 #define pWdg GtkWidget*
@@ -130,6 +131,8 @@
 #define WDG_LBL_ARTIST "artist_label"
 #define WDG_LBL_ALBUMTITLE "albumtitle_label"
 #define WDG_LBL_GENRE "genre_label"
+#define WDG_LBL_QUALITY "quality_label"
+#define WDG_LBL_BITRATE "bitrate_label"
 #define WDG_MUSIC_DIR "music_dir"
 
 #define STR_FREE(x) g_free(x);x=NULL
@@ -222,6 +225,7 @@ typedef struct _prefs {
     int make_playlist;
     int rip_wav;
     int rip_mp3;
+    int rip_flac;
     int mp3_vbr;
     int mp3_quality;
     int main_window_width;
@@ -240,6 +244,7 @@ typedef struct _shared {
 	FILE *playlist_wav;
 	FILE *log_fd;
 	FILE *playlist_mp3;
+	FILE *playlist_flac;
 	GCond *available;
 	GList *disc_matches;
 	GList *drive_list;
@@ -258,6 +263,7 @@ typedef struct _shared {
 	cddb_conn_t *cddb_conn;
 	cddb_disc_t *cddb_disc;
 	double mp3_percent;
+	double flac_percent;
 	double rip_percent;
 	gboolean track_format[100];
 	int cddb_matches;
@@ -268,10 +274,13 @@ typedef struct _shared {
 	int numCdparanoiaOk;
 	int numLameFailed;
 	int numLameOk;
+	int numFlacFailed;
+	int numFlacOk;
 	int rip_tracks_completed;
 	int tracks_to_rip;
 	pid_t cdparanoia_pid;
 	pid_t lame_pid;
+	pid_t flac_pid;
 } shared;
 
 typedef struct _cdrom {
@@ -1751,15 +1760,21 @@ static void on_rip_button_clicked(GtkButton *button, gpointer user_data)
 	dorip();
 }
 
+static void missing_encoder_dialog(gchar *program, gchar *format)
+{
+	DIALOG_ERROR_OK(_(
+		"The '%s' program was not found in your 'PATH'."
+		" %s requires that program in order to create %s files."
+	    " All %s functionality is disabled."
+		" You should install '%s' on this computer if you want to convert"
+		" audio tracks to %s."),
+		program, PROGRAM_NAME, format, format, program, format);
+}
+
 static void on_rip_mp3_toggled(GtkToggleButton *button, gpointer user_data)
 {
 	if (gtk_toggle_button_get_active(button) && !program_exists(LAME_PRG)) {
-		DIALOG_ERROR_OK(_("The '%s' program was not found in your 'PATH'."
-			" %s requires that program in order to create MP3 files. All MP3"
-			" functionality is disabled."
-			" You should install '%s' on this computer if you want to convert"
-			" audio tracks to MP3."), LAME_PRG, PROGRAM_NAME, LAME_PRG);
-
+		missing_encoder_dialog(LAME_PRG, "MP3");
 		g_prefs->rip_mp3 = 0;
 		gtk_toggle_button_set_active(button, g_prefs->rip_mp3);
 	}
@@ -1767,6 +1782,15 @@ static void on_rip_mp3_toggled(GtkToggleButton *button, gpointer user_data)
 		disable_mp3_widgets();
 	else
 		enable_mp3_widgets();
+}
+
+static void on_rip_flac_toggled(GtkToggleButton *button, gpointer user_data)
+{
+	if (gtk_toggle_button_get_active(button) && !program_exists(FLAC_PRG)) {
+		missing_encoder_dialog(FLAC_PRG, "FLAC");
+		g_prefs->rip_flac = 0;
+		gtk_toggle_button_set_active(button, g_prefs->rip_flac);
+	}
 }
 
 static void on_rip_toggled(GtkCellRendererToggle *cell, gchar *path,
@@ -2504,6 +2528,7 @@ static GtkWidget *create_prefs(void)
 
 	/* WAV */
 	frame = gtk_frame_new(NULL);
+	gtk_frame_set_label(GTK_FRAME(frame), _("Lossless formats"));
 	gtk_widget_show(frame);
 	BOXPACK(vbox, frame, FALSE, FALSE, 0);
 	GtkWidget *alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
@@ -2514,21 +2539,26 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(wbox);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
-	GtkWidget *rip_wav = gtk_check_button_new_with_mnemonic(
-													_("WAV (uncompressed)"));
+
+	GtkWidget *rip_wav = gtk_check_button_new_with_label(
+										_("WAVE (uncompressed)"));
 	gtk_widget_show(rip_wav);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_wav);
-
-	label = gtk_label_new(
-			_("WAV files retain maximum sound quality, but they are very big."
-			" You should keep WAV files if you intend to create Audio discs."
-			" WAV files can be converted back to audio tracks with CD burning"
-			" software."));
-
-	gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
-	gtk_widget_show(label);
-	BOXPACK(wbox, label, FALSE, FALSE, 0);
+	BOXPACK(wbox, rip_wav, FALSE, FALSE, 0);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, rip_wav,
+						_("Original sound quality, big size."), NULL);
 	/* END WAV */
+
+	/* FLAC */
+	GtkWidget *rip_flac = gtk_check_button_new_with_label(
+									_("FLAC (compressed)"));
+	gtk_widget_show(rip_flac);
+	BOXPACK(wbox, rip_flac, FALSE, FALSE, 0);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, rip_flac,
+						_("Original sound quality, smaller size."), NULL);
+	CONNECT_SIGNAL(rip_flac, "toggled", on_rip_flac_toggled);
+	/* END FLAC */
 
 	/* MP3 */
 	frame = gtk_frame_new(NULL);
@@ -2558,9 +2588,10 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(hboxcombo);
 	BOXPACK(vbox, hboxcombo, FALSE, FALSE, 1);
 
-	label = gtk_label_new(_("Quality : "));
-	gtk_widget_show(label);
-	BOXPACK(hboxcombo, label, FALSE, FALSE, 0);
+	GtkWidget *quality_label = gtk_label_new(_("Quality : "));
+	gtk_widget_show(quality_label);
+	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
+	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY);
 
 	GtkWidget *mp3_quality = gtk_combo_box_new_text();
 	gtk_widget_show(mp3_quality);
@@ -2581,9 +2612,10 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(hbox);
 	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
 
-	label = gtk_label_new(_("Bitrate : "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
+	GtkWidget *bitrate_label = gtk_label_new(_("Bitrate : "));
+	gtk_widget_show(bitrate_label);
+	BOXPACK(hbox, bitrate_label, FALSE, FALSE, 0);
+	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
 
 	int rate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
 	gchar *kbps = g_strdup_printf(_("%dKbps"), rate);
@@ -2599,6 +2631,7 @@ static GtkWidget *create_prefs(void)
 	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
 	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
 	/* END MP3 */
+
 
 	label = gtk_label_new(_("Encode"));
 	gtk_widget_show(label);
@@ -2745,6 +2778,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
 	HOOKUP(prefs, fmt_playlist, WDG_FMT_PLAYLIST);
 	HOOKUP(prefs, rip_wav, "rip_wav");
+	HOOKUP(prefs, rip_flac, "rip_flac");
 	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
 	HOOKUP(prefs, mp3_quality, WDG_MP3_QUALITY);
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
@@ -2815,6 +2849,8 @@ static void disable_mp3_widgets(void)
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3VBR), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3_QUALITY), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_BITRATE), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_BITRATE), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY), FALSE);
 }
 
 static void enable_mp3_widgets(void)
@@ -2822,12 +2858,21 @@ static void enable_mp3_widgets(void)
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3VBR), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3_QUALITY), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_BITRATE), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_BITRATE), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY), TRUE);
 }
 
-static void show_completed_dialog(int numOk, int numFailed)
+static void show_completed_dialog()
 {
 #define CREATOK " created successfully"
 #define CREATKO "There was an error creating "
+
+	int numOk = g_data->numCdparanoiaOk
+				+ g_data->numLameOk + g_data->numFlacOk;
+
+	int numFailed = g_data->numCdparanoiaFailed
+				+ g_data->numLameFailed + g_data->numFlacFailed;
+
     if(numFailed > 0) {
 		DIALOG_WARNING_CLOSE(
 				ngettext(CREATKO "%d file", CREATKO "%d files", numFailed),
@@ -2863,6 +2908,7 @@ static prefs *get_default_prefs()
 	p->mp3_vbr = 1;
 	p->rip_mp3 = 1;
 	p->rip_wav = 0;
+	p->rip_flac = 0;
 	p->use_proxy = 0;
 	p->port_number = DEFAULT_PROXY_PORT;
 	p->cddb_port= DEFAULT_CDDB_SERVER_PORT;
@@ -2926,6 +2972,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
 	set_pref_toggle("rip_mp3", p->rip_mp3);
 	set_pref_toggle("rip_wav", p->rip_wav);
+	set_pref_toggle("rip_flac", p->rip_flac);
 	set_pref_toggle("use_proxy", p->use_proxy);
 	set_pref_toggle("cddb_nocache", p->cddb_nocache);
 
@@ -3012,6 +3059,7 @@ static void get_prefs_from_widgets(prefs *p)
 	p->mp3_quality = gtk_combo_box_get_active(COMBO_MP3Q);
 	p->make_playlist = get_pref_toggle("make_playlist");
 	p->rip_wav = get_pref_toggle("rip_wav");
+	p->rip_flac = get_pref_toggle("rip_flac");
 	p->rip_mp3 = get_pref_toggle("rip_mp3");
 	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
@@ -3075,6 +3123,7 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "FORMAT_PLAYLIST=%s\n", p->format_playlist);
 	fprintf(fd, "FORMAT_ALBUMDIR=%s\n", p->format_albumdir);
 	fprintf(fd, "RIP_WAV=%d\n", p->rip_wav);
+	fprintf(fd, "RIP_FLAC=%d\n", p->rip_flac);
 	fprintf(fd, "RIP_MP3=%d\n", p->rip_mp3);
 	fprintf(fd, "MP3_VBR=%d\n", p->mp3_vbr);
 	fprintf(fd, "MP3_QUALITY=%d\n", p->mp3_quality);
@@ -3138,6 +3187,7 @@ static void load_prefs()
 	get_field_as_szentry(s, file, "MUSIC_DIR", p->music_dir);
 	get_field_as_long(s,file,"MAKE_PLAYLIST", &(p->make_playlist));
 	get_field_as_long(s,file,"RIP_WAV", &(p->rip_wav));
+	get_field_as_long(s,file,"RIP_FLAC", &(p->rip_flac));
 	get_field_as_long(s,file,"RIP_MP3", &(p->rip_mp3));
 	get_field_as_long(s,file,"MP3_VBR", &(p->mp3_vbr));
 
@@ -3316,11 +3366,16 @@ static void abort_threads()
     if (g_data->lame_pid != 0) {
         kill(g_data->lame_pid, SIGKILL);
 	}
+    if (g_data->flac_pid != 0) {
+        kill(g_data->flac_pid, SIGKILL);
+	}
     // wait until all the worker threads are done
-    while (g_data->cdparanoia_pid != 0 || g_data->lame_pid != 0) {
+    while (g_data->cdparanoia_pid != 0
+			|| g_data->lame_pid != 0
+			|| g_data->flac_pid != 0) {
         Sleep(300);
-		TRACEINFO("cdparanoia=%d lame=%d", g_data->cdparanoia_pid,
-												g_data->lame_pid);
+		TRACEINFO("cdparanoia=%d lame=%d flac=%d", g_data->cdparanoia_pid,
+										g_data->lame_pid, g_data->flac_pid);
     }
     g_cond_signal(g_data->available);
     g_thread_join(g_data->ripper);
@@ -3328,8 +3383,7 @@ static void abort_threads()
     g_thread_join(g_data->tracker);
     // gdk_flush();
     g_data->working = false;
-    show_completed_dialog(g_data->numCdparanoiaOk + g_data->numLameOk,
-						g_data->numCdparanoiaFailed + g_data->numLameFailed);
+    show_completed_dialog();
     gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
     gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
 	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
@@ -3556,6 +3610,7 @@ static void reset_counters()
 	g_data->barrier = g_mutex_new();
 	g_data->available = g_cond_new();
 	g_data->mp3_percent = 0.0;
+	g_data->flac_percent = 0.0;
 	g_data->rip_tracks_completed = 0;
 	g_data->encode_tracks_completed = 0;
 	g_data->numCdparanoiaFailed = 0;
@@ -3570,7 +3625,7 @@ static void dorip()
 {
 	reset_counters();
 	set_status("make sure there's at least one format to rip to");
-	if (!g_prefs->rip_wav && !g_prefs->rip_mp3) {
+	if (!g_prefs->rip_wav && !g_prefs->rip_mp3 && !g_prefs->rip_flac) {
 		DIALOG_ERROR_OK(_("No ripping/encoding method selected."
 						" Please enable one from the 'Preferences' menu."));
 		return;
@@ -3635,6 +3690,13 @@ static void dorip()
 			make_playlist(filename, &(g_data->playlist_mp3));
 			g_free(filename);
 		}
+		if (g_prefs->rip_flac) {
+			char *filename = make_filename(prefs_get_music_dir(g_prefs),
+											albumdir, playlist, "flac.m3u");
+			make_playlist(filename, &(g_data->playlist_flac));
+			g_free(filename);
+		}
+
 	}
 	g_free(albumdir);
 	g_free(playlist);
@@ -3738,6 +3800,107 @@ static void lamehq(int tracknum, char *artist, char *album, char *title,
 	sigchld();
 }
 
+static gchar* make_flac_arg(char *field, char *value)
+{
+	if(!field || !value) {
+		fatalError("NULL parameter to make_flac_arg.");
+		return NULL;
+	}
+	return g_strdup_printf("%s=%s", field, value);
+}
+
+static void push_flac_tag(const char *args[], int *pos, char *tag)
+{
+	if(!args || !pos || !tag) return;
+
+	int i = *pos;
+	if(strlen(tag) > 0) {
+		args[i++] = "-T";
+		args[i++] = tag;
+		*pos = i;
+	}
+}
+
+// uses the FLAC reference encoder to encode a WAV file into a FLAC and tag it
+//
+// tracknum - the track number
+// artist - the artist's name
+// album - the album the song came from
+// title - the name of the song
+// wavfilename - the path to the WAV file to encode
+// flacfilename - the path to the output FLAC file
+// compression_level - how hard to compress the file (0-8) see flac man page
+static void flac(int tracknum, char *artist, char *album, char *title,
+				char *genre, char *year, char *wavfilename,
+				char *flacfilename, int compression_level)
+{
+	char compression_level_text[3];
+	snprintf(compression_level_text, 3, "-%d", compression_level);
+	char tracknum_text[19];
+	snprintf(tracknum_text, 15, "TRACKNUMBER=%d", tracknum);
+
+	gchar *artist_text = make_flac_arg("ARTIST", artist);
+	gchar *album_text = make_flac_arg("ALBUM", album);
+	gchar *title_text = make_flac_arg("TITLE", title);
+	gchar *genre_text = make_flac_arg("GENRE", genre);
+	gchar *year_text = make_flac_arg("DATE", year);
+
+	const char *args[19];
+	int pos = 0;
+	args[pos++] = "flac";
+	args[pos++] = "-f";
+	args[pos++] = compression_level_text;
+	if ((tracknum > 0) && (tracknum < 100)) {
+		push_flac_tag(args,&pos,tracknum_text);
+	}
+	push_flac_tag(args,&pos,artist_text);
+	push_flac_tag(args,&pos,album_text);
+	push_flac_tag(args,&pos,title_text);
+	push_flac_tag(args,&pos,genre_text);
+	push_flac_tag(args,&pos,year_text);
+	args[pos++] = wavfilename;
+	args[pos++] = "-o";
+	args[pos++] = flacfilename;
+	args[pos++] = NULL;
+
+	int fd = exec_with_output(args, STDERR_FILENO, &g_data->flac_pid);
+	char buf[256];
+	int size;
+	do {
+		pos = -1;
+		do {
+			pos++;
+			size = read(fd, &buf[pos], 1);
+			/* signal interrupted read(), try again */
+			if (size == -1 && errno == EINTR) {
+				pos--;
+				size = 1;
+			}
+		} while ((buf[pos] != '\r') && (buf[pos] != '\n')
+							&& (size > 0) && (pos < 256));
+		buf[pos] = '\0';
+		for (; pos>0; pos--) {
+			if (buf[pos] == ':') {
+				pos++;
+				break;
+			}
+		}
+		int sector;
+		if (sscanf(&buf[pos], "%d%%", &sector) == 1) {
+			g_data->flac_percent = (double)sector/100;
+		}
+	} while (size > 0);
+
+	close(fd);
+	g_free(artist_text);
+	g_free(album_text);
+	g_free(title_text);
+	g_free(genre_text);
+	g_free(year_text);
+	Sleep(200);
+	sigchld();
+}
+
 static void set_main_completion(const gchar *widget_name)
 {
 	GtkWidget *w = LKP_MAIN(widget_name);
@@ -3764,6 +3927,9 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 
 	char *mp3filename = make_filename(prefs_get_music_dir(g_prefs),
 										albumdir, musicfilename, "mp3");
+
+	char *flacfilename = make_filename(prefs_get_music_dir(g_prefs),
+										albumdir, musicfilename, "flac");
 	g_free(musicfilename);
 	g_free(albumdir);
 	int min;
@@ -3798,6 +3964,35 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 	}
 	g_free(mp3filename);
 
+	if (g_prefs->rip_flac) {
+		TRACEINFO("Flac Encoding track %d to '%s'", tracknum, flacfilename);
+		if (g_data->aborted) g_thread_exit(NULL);
+
+		struct stat statStruct;
+		int	rc = stat(flacfilename, &statStruct);
+		bool doEncode = true;
+		if (rc == 0) {
+			gdk_threads_enter();
+			if (!confirmOverwrite(flacfilename))
+				doEncode = false;
+			gdk_threads_leave();
+		}
+		if (doEncode) {
+			flac(tracknum, trackartist, album_title, tracktitle,
+					genre, album_year, wavfilename, flacfilename,
+					8 /*compression */);
+		}
+		if (g_data->aborted) g_thread_exit(NULL);
+
+		if (g_data->playlist_flac) {
+			fprintf(g_data->playlist_flac, "#EXTINF:%d,%s - %s\n",
+					(min * 60) + sec, trackartist, tracktitle);
+			fprintf(g_data->playlist_flac, "%s\n", basename(flacfilename));
+			fflush(g_data->playlist_flac);
+		}
+	}
+	g_free(flacfilename);
+
 	if (!g_prefs->rip_wav) {
 		TRACEINFO("Removing track %d WAV file", tracknum);
 		if (unlink(wavfilename) != 0) {
@@ -3814,6 +4009,7 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 	}
 	g_free(wavfilename);
 	g_data->mp3_percent = 0.0;
+	g_data->flac_percent = 0.0;
 	g_data->encode_tracks_completed++;
 }
 
@@ -3880,6 +4076,8 @@ static gpointer encode_thread(gpointer data)
 	g_data->playlist_wav = NULL;
 	if (g_data->playlist_mp3) fclose(g_data->playlist_mp3);
 	g_data->playlist_mp3 = NULL;
+	if (g_data->playlist_flac) fclose(g_data->playlist_flac);
+	g_data->playlist_flac = NULL;
 
 	g_mutex_free(g_data->barrier);
 	g_data->barrier = NULL;
@@ -3888,7 +4086,9 @@ static gpointer encode_thread(gpointer data)
 
 	TRACEINFO("rip_percent= %f %%", g_data->rip_percent);
 	/* wait until all the worker threads are done */
-	while (g_data->cdparanoia_pid != 0 || g_data->lame_pid != 0) {
+	while (g_data->cdparanoia_pid != 0 
+			|| g_data->lame_pid != 0
+			|| g_data->flac_pid != 0) {
 		// printf("w2\n");
 		Sleep(300);
 	}
@@ -3897,8 +4097,7 @@ static gpointer encode_thread(gpointer data)
 	g_data->allDone = true;		// so the tracker thread will exit
 	g_data->working = false;
 	gdk_threads_enter();
-	show_completed_dialog(g_data->numCdparanoiaOk + g_data->numLameOk,
-						g_data->numCdparanoiaFailed + g_data->numLameFailed);
+	show_completed_dialog();
 	gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
 	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
@@ -3911,6 +4110,7 @@ static gpointer track_thread(gpointer data)
 {
 	int parts = 1;
 	if (g_prefs->rip_mp3) parts++;
+	if (g_prefs->rip_flac) parts++;
 	gdk_threads_enter();
 	GtkProgressBar *pbar_total = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_TOTAL));
 	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
@@ -3943,7 +4143,9 @@ static gpointer track_thread(gpointer data)
 			g_thread_exit(NULL);
 		}
 		if(!started && g_data->rip_percent <= 0.0
-			&& (parts == 1 || g_data->mp3_percent <= 0.0)) {
+			&& (parts == 1
+				|| g_data->flac_percent <= 0.0
+				|| g_data->mp3_percent <= 0.0)) {
 			Sleep(400);
 			continue;
 		}
@@ -3963,7 +4165,8 @@ static gpointer track_thread(gpointer data)
 		if (parts > 1) {
 			completed = g_data->encode_tracks_completed;
 			pencode = ((double)completed / (double)torip)
-					+ ((g_data->mp3_percent) / (parts - 1) / torip);
+					+ ((g_data->mp3_percent + g_data->flac_percent)
+							/ (parts - 1) / torip);
 
 			snprintf(sencode, 13, "%d%% (%d/%d)", (int)(pencode * 100),
 				(completed < torip) ? (completed + 1) : torip, torip);
@@ -4010,9 +4213,12 @@ static void sigchld()
 	int status = -1;
 	pid_t pid = wait(&status);
 	TRACEINFO("waited for %d, status=%d (know about wav %d, mp3 %d)",
-			pid, status, g_data->cdparanoia_pid, g_data->lame_pid);
+						pid, status, g_data->cdparanoia_pid,
+						g_data->lame_pid, g_data->flac_pid);
 
-	if (pid != g_data->cdparanoia_pid && pid != g_data->lame_pid) {
+	if (pid != g_data->cdparanoia_pid
+			&& pid != g_data->lame_pid
+			&& pid != g_data->flac_pid) {
 		TRACERROR("unknown pid '%d', please report bug.", pid);
 	}
 	if (WIFEXITED(status)) {
@@ -4032,6 +4238,9 @@ static void sigchld()
 		} else if (pid == g_data->lame_pid) {
 			g_data->lame_pid = 0;
 			g_data->numLameFailed++;
+		} else if (pid == g_data->flac_pid) {
+			g_data->flac_pid = 0;
+			g_data->numFlacFailed++;
 		}
 	} else {
 		if (pid == g_data->cdparanoia_pid) {
@@ -4041,6 +4250,9 @@ static void sigchld()
 		} else if (pid == g_data->lame_pid) {
 			g_data->lame_pid = 0;
 			g_data->numLameOk++;
+		} else if (pid == g_data->flac_pid) {
+			g_data->flac_pid = 0;
+			g_data->numFlacOk++;
 		}
 	}
 }
@@ -4069,7 +4281,7 @@ static int exec_with_output(const char *args[], int toread, pid_t *p)
 		fatalError("exec_with_output(): execvp() failed");
 	}
 	// i'm the parent
-	TRACEINFO("%d started: %s ", *p, args[0]);
+	TRACEINFO("%d started: %s", *p, args[0]);
 	// close the side of the pipe we don't need
 	close(pipefd[1]);
 	return pipefd[0];

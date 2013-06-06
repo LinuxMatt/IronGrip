@@ -3,6 +3,9 @@ TODO
 
 Higher priority:
 ----------------
+* use --best for flac compression
+* fix encoding failures with flac
+* fix sigchld for flac
 * .cddbslave multiple matches not working (maybe a bug in libcddb)
 * when cdrom drive is changed in preferences, scan again asap
 

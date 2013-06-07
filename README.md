@@ -7,6 +7,7 @@ Features
 - Supports WAV, MP3 and FLAC encoding
 - Uses CDDB
 - Finds cdrom drives
+- Compilation and installation from source is easy ;)
 
 Binary packages
 ---------------
@@ -38,7 +39,7 @@ Requirements
 
 Installing requirements in Ubuntu and Debian
 --------------------------------------------
-To install Cdparanoia and Lame from a terminal, type the following commands:
+To install Cdparanoia, Lame and flac from a terminal, type the following commands:
 - sudo apt-get install cdparanoia
 - sudo apt-get install lame
 - sudo apt-get install flac

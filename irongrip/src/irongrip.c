@@ -281,6 +281,12 @@ typedef struct _shared {
 	pid_t cdparanoia_pid;
 	pid_t lame_pid;
 	pid_t flac_pid;
+	double prip;
+	char srip[32];
+	double pencode;
+	char sencode[13];
+	double ptotal;
+	int parts;
 } shared;
 
 typedef struct _cdrom {
@@ -294,6 +300,8 @@ static GtkWidget *win_main = NULL;
 static GtkWidget *win_prefs = NULL;
 static prefs *g_prefs = NULL;
 static shared *g_data = NULL;
+G_LOCK_DEFINE_STATIC(mono);
+static int mono = 0;
 
 // Functions Prototypes
 static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y);
@@ -308,7 +316,7 @@ static int exec_with_output(const char *args[], int toread, pid_t *p);
 static int is_valid_port_number(int number);
 static void disable_all_main_widgets(void);
 static void disable_mp3_widgets(void);
-static void dorip();
+static void dorip_mainthread();
 static void enable_all_main_widgets(void);
 static void enable_mp3_widgets(void);
 static void get_prefs_from_widgets(prefs *p);
@@ -1224,7 +1232,7 @@ static GList *lookup_disc(cddb_disc_t *disc)
 	g_data->cddb_thread = g_thread_create(cddb_thread_run, NULL, TRUE, NULL);
 
 	// show cddb update window
-	gdk_threads_enter();
+	//gdk_threads_enter();
 	disable_all_main_widgets();
 
 	GtkLabel *status = GTK_LABEL(LKP_MAIN(WDG_STATUS));
@@ -1238,7 +1246,7 @@ static GList *lookup_disc(cddb_disc_t *disc)
 	}
 	gtk_label_set_text(status, "CDDB query finished.");
 	enable_all_main_widgets();
-	gdk_threads_leave();
+	// gdk_threads_leave();
 
 	// make a list of all the matches
 	GList *matches = NULL;
@@ -1731,9 +1739,7 @@ static void on_press_f2(void)
 
 static void on_lookup_clicked(GtkToolButton *button, gpointer user_data)
 {
-	gdk_threads_leave();
 	refresh(1);
-	gdk_threads_enter();
 }
 
 static bool lookup_cdparanoia()
@@ -1757,7 +1763,7 @@ static void on_rip_button_clicked(GtkButton *button, gpointer user_data)
 		return;
 	}
 	if(!lookup_cdparanoia()) return;
-	dorip();
+	dorip_mainthread();
 }
 
 static void missing_encoder_dialog(gchar *program, gchar *format)
@@ -3597,7 +3603,9 @@ static void fmt_status(const char *fmt, ...) {
 	va_start(args,fmt);
 	g_vasprintf(&str, fmt, args);
 	va_end(args);
+	gdk_threads_enter();
 	set_status(str);
+	gdk_threads_leave();
 	g_free(str);
 }
 
@@ -3621,10 +3629,9 @@ static void reset_counters()
 }
 
 // spawn needed threads and begin ripping
-static void dorip()
+static void dorip_mainthread()
 {
 	reset_counters();
-	set_status("make sure there's at least one format to rip to");
 	if (!g_prefs->rip_wav && !g_prefs->rip_mp3 && !g_prefs->rip_flac) {
 		DIALOG_ERROR_OK(_("No ripping/encoding method selected."
 						" Please enable one from the 'Preferences' menu."));
@@ -3707,7 +3714,9 @@ static void dorip()
 	gtk_widget_hide(LKP_MAIN(WDG_SCROLL));
 
 	g_data->ripper = g_thread_create(rip_thread, NULL, TRUE, NULL);
+	/*
 	g_data->encoder = g_thread_create(encode_thread, NULL, TRUE, NULL);
+	*/
 	g_data->tracker = g_thread_create(track_thread, NULL, TRUE, NULL);
 }
 
@@ -4016,17 +4025,18 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 // the thread that handles encoding WAV files to all other formats
 static gpointer encode_thread(gpointer data)
 {
+	gdk_threads_enter();
 	set_main_completion(WDG_ALBUM_ARTIST);
 	set_main_completion(WDG_ALBUM_TITLE);
 	set_main_completion(WDG_ALBUM_GENRE);
-
 	gboolean single_artist = get_main_toggle(WDG_SINGLE_ARTIST);
 	gboolean single_genre = get_main_toggle(WDG_SINGLE_GENRE);
-
 	GtkListStore *store = get_tracklist_store();
 	GtkTreeIter iter;
 	GtkTreeModel *tree_store = GTK_TREE_MODEL(store);
 	gboolean row = gtk_tree_model_get_iter_first(tree_store, &iter);
+	gdk_threads_leave();
+
 	while (row) {
 		g_mutex_lock(g_data->barrier);
 		while ((g_data->counter < 1) && (!g_data->aborted)) {
@@ -4096,54 +4106,40 @@ static gpointer encode_thread(gpointer data)
 	TRACEINFO("Waking up to allDone");
 	g_data->allDone = true;		// so the tracker thread will exit
 	g_data->working = false;
-	gdk_threads_enter();
+	//gdk_threads_enter();
 	show_completed_dialog();
 	gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
 	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
-	gdk_threads_leave();
+	//gdk_threads_leave();
 	return NULL;
 }
 
 // calculates the progress of the other threads and updates the progress bars
 static gpointer track_thread(gpointer data)
 {
-	int parts = 1;
-	if (g_prefs->rip_mp3) parts++;
-	if (g_prefs->rip_flac) parts++;
-	gdk_threads_enter();
-	GtkProgressBar *pbar_total = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_TOTAL));
-	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
-	GtkProgressBar *pbar_encode = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_ENCODE));
-	gtk_progress_bar_set_fraction(pbar_total, 0.0);
-	gtk_progress_bar_set_text(pbar_total, _("Waiting..."));
-	gtk_progress_bar_set_fraction(pbar_rip, 0.0);
-	gtk_progress_bar_set_text(pbar_rip, _("Waiting..."));
-	if (parts > 1) {
-		gtk_progress_bar_set_fraction(pbar_encode, 0.0);
-		gtk_progress_bar_set_text(pbar_encode, _("Waiting..."));
-	} else {
-		gtk_progress_bar_set_fraction(pbar_encode, 1.0);
-		gtk_progress_bar_set_text(pbar_encode, "100% (0/0)");
-	}
-	gdk_threads_leave();
+	g_data->parts = 1;
+	if (g_prefs->rip_mp3) g_data->parts++;
+	if (g_prefs->rip_flac) g_data->parts++;
 
-	double prip;
+	G_LOCK(mono);
+	mono = 1;
+	G_UNLOCK(mono);
+
 	int torip;
 	int completed;
-	char srip[32];
-	double pencode = 0;
-	char sencode[13];
-	double ptotal = 0.0;;
 	bool started = false;
+	g_data->prip = 0;
+	g_data->pencode = 0;
+	g_data->ptotal = 0.0;
 
-	while (!g_data->allDone && ptotal < 1.0) {
+	while (!g_data->allDone && g_data->ptotal < 1.0) {
 		if (g_data->aborted) {
 			TRACEWARN("Aborted 1");
 			g_thread_exit(NULL);
 		}
 		if(!started && g_data->rip_percent <= 0.0
-			&& (parts == 1
+			&& (g_data->parts == 1
 				|| g_data->flac_percent <= 0.0
 				|| g_data->mp3_percent <= 0.0)) {
 			Sleep(400);
@@ -4153,49 +4149,45 @@ static gpointer track_thread(gpointer data)
 		torip = g_data->tracks_to_rip;
 		completed = g_data->rip_tracks_completed;
 
-		prip = (completed + g_data->rip_percent) / torip;
-		snprintf(srip, 32, "%02.2f%% (%d/%d)", (prip * 100),
+		g_data->prip = (completed + g_data->rip_percent) / torip;
+		snprintf(g_data->srip, 32, "%02.2f%% (%d/%d)", (g_data->prip * 100),
 				(completed < torip) ? (completed + 1) : torip, torip);
 
-		if(prip>1.0) {
+		if(g_data->prip>1.0) {
 			TRACEWARN("prip overflow=%.2f%% completed=%d rip=%.2f%% remain=%d",
-						prip, completed, g_data->rip_percent, torip);
-			prip=1.0;
+						g_data->prip, completed, g_data->rip_percent, torip);
+			g_data->prip=1.0;
 		}
-		if (parts > 1) {
+		if (g_data->parts > 1) {
 			completed = g_data->encode_tracks_completed;
-			pencode = ((double)completed / (double)torip)
+			g_data->pencode = ((double)completed / (double)torip)
 					+ ((g_data->mp3_percent + g_data->flac_percent)
-							/ (parts - 1) / torip);
+							/ (g_data->parts - 1) / torip);
 
-			snprintf(sencode, 13, "%d%% (%d/%d)", (int)(pencode * 100),
-				(completed < torip) ? (completed + 1) : torip, torip);
+			snprintf(g_data->sencode, 13, "%d%% (%d/%d)",
+						(int)(g_data->pencode * 100),
+						(completed < torip) ? (completed + 1) : torip, torip);
 
-			ptotal = prip / parts + pencode * (parts - 1) / parts;
+			g_data->ptotal = g_data->prip / g_data->parts
+								+ g_data->pencode * (g_data->parts - 1)
+								/ g_data->parts;
 		} else {
-			ptotal = prip;
+			g_data->ptotal = g_data->prip;
 		}
 		if (g_data->aborted) {
 			TRACEWARN("Aborted 2");
 			g_thread_exit(NULL);
 		}
-		gdk_threads_enter();
-		gtk_progress_bar_set_fraction(pbar_rip, prip);
-		gtk_progress_bar_set_text(pbar_rip, srip);
-		if (parts > 1) {
-			gtk_progress_bar_set_fraction(pbar_encode, pencode);
-			gtk_progress_bar_set_text(pbar_encode, sencode);
-		}
-		gtk_progress_bar_set_fraction(pbar_total, ptotal);
-		gchar *stotal = g_strdup_printf("%02.2f%%", ptotal * 100);
-		gtk_progress_bar_set_text(pbar_total, stotal);
-		gchar *windowTitle = g_strdup_printf("%s - %s", PROGRAM_NAME, stotal);
-		gtk_window_set_title(GTK_WINDOW(win_main), windowTitle);
-		g_free(windowTitle);
-		g_free(stotal);
-		gdk_threads_leave();
+		G_LOCK(mono);
+		mono = 2;
+		G_UNLOCK(mono);
 		Sleep(200);
 	}
+
+	G_LOCK(mono);
+	mono = 0;
+	G_UNLOCK(mono);
+
 	gdk_threads_enter();
 	set_status("Ready.");
 	gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
@@ -4287,6 +4279,68 @@ static int exec_with_output(const char *args[], int toread, pid_t *p)
 	return pipefd[0];
 }
 
+static gboolean cb_gui_update(gpointer data)
+{
+	static int i = 0;
+	i++;
+
+	gchar *text = g_strdup_printf("Update %d", i);
+
+	GtkWidget *s = LKP_MAIN(WDG_STATUS);
+	gtk_label_set_text(GTK_LABEL(s), _(text));
+	gtk_label_set_use_markup(GTK_LABEL(s), TRUE);
+	g_free(text);
+
+
+	int action = 0;
+
+	G_LOCK(mono);
+	action = mono;
+	G_UNLOCK(mono);
+
+	GtkProgressBar *pbar_total = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_TOTAL));
+	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
+	GtkProgressBar *pbar_encode = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_ENCODE));
+	switch(action) {
+		case 1:
+			{
+				gtk_progress_bar_set_fraction(pbar_total, 0.0);
+				gtk_progress_bar_set_text(pbar_total, _("Waiting..."));
+				gtk_progress_bar_set_fraction(pbar_rip, 0.0);
+				gtk_progress_bar_set_text(pbar_rip, _("Waiting..."));
+				if (g_data->parts > 1) {
+					gtk_progress_bar_set_fraction(pbar_encode, 0.0);
+					gtk_progress_bar_set_text(pbar_encode, _("Waiting..."));
+				} else {
+					gtk_progress_bar_set_fraction(pbar_encode, 1.0);
+					gtk_progress_bar_set_text(pbar_encode, "100% (0/0)");
+				}
+			}
+			break;
+
+		case 2:
+			{
+				gtk_progress_bar_set_fraction(pbar_rip, g_data->prip);
+				gtk_progress_bar_set_text(pbar_rip, g_data->srip);
+				if (g_data->parts > 1) {
+					gtk_progress_bar_set_fraction(pbar_encode, g_data->pencode);
+					gtk_progress_bar_set_text(pbar_encode, g_data->sencode);
+				}
+				gtk_progress_bar_set_fraction(pbar_total, g_data->ptotal);
+				gchar *stotal = g_strdup_printf("%02.2f%%", g_data->ptotal * 100);
+				gtk_progress_bar_set_text(pbar_total, stotal);
+				gchar *windowTitle = g_strdup_printf("%s - %s", PROGRAM_NAME, stotal);
+				gtk_window_set_title(GTK_WINDOW(win_main), windowTitle);
+				g_free(windowTitle);
+				g_free(stotal);
+			}
+			break;
+	}
+
+	return TRUE;
+}
+
+
 int main(int argc, char *argv[])
 {
 	g_data = g_malloc0(sizeof(shared));
@@ -4306,9 +4360,11 @@ int main(int argc, char *argv[])
 	gtk_widget_show(win_main);
 	lookup_cdparanoia();
 	// recurring timeout to automatically re-scan cdrom once in a while
-	g_timeout_add(10000, idle, (void *)1);
+	gdk_threads_add_timeout(10000, idle, (void *)1);
+
 	// add an idle event to scan the cdrom drive ASAP
-	g_idle_add(scan_on_startup, NULL);
+	gdk_threads_add_idle(scan_on_startup, NULL);
+	gdk_threads_add_timeout(1000, cb_gui_update, NULL);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();

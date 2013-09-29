@@ -208,7 +208,8 @@ enum {
 	ACTION_UPDATE_PBAR,
 	ACTION_READY,
 	ACTION_COMPLETION,
-	ACTION_ENCODED
+	ACTION_ENCODED,
+	ACTION_EJECTING
 };
 
 #define SZENTRY 256
@@ -3541,8 +3542,6 @@ static void rip_track(int tracknum, const char *trackartist,
 
 	char *wavfilename = make_filename(prefs_get_music_dir(g_prefs), albumdir,
 														musicfilename, "wav");
-	fmt_status("Ripping track %d ...", tracknum);
-
 	if (g_data->aborted) g_thread_exit(NULL);
 	struct stat statStruct;
 	bool doRip = true;;
@@ -3606,7 +3605,7 @@ static gpointer rip_thread(gpointer data)
 	}
 	// no more tracks to rip, safe to eject
 	if (g_prefs->eject_on_done) {
-		fmt_status("Trying to eject disc in '%s'...", g_data->device);
+		set_gui_action(ACTION_EJECTING);
 		eject_disc(g_data->device);
 	}
 	return NULL;
@@ -3624,9 +3623,7 @@ static void fmt_status(const char *fmt, ...) {
 	va_start(args,fmt);
 	g_vasprintf(&str, fmt, args);
 	va_end(args);
-	gdk_threads_enter();
 	set_status(str);
-	gdk_threads_leave();
 	g_free(str);
 }
 
@@ -4287,12 +4284,8 @@ static gboolean cb_gui_update(gpointer data)
 	static int i = 0;
 	i++;
 
-	gchar *text = g_strdup_printf("Update %d", i);
-
-	GtkWidget *s = LKP_MAIN(WDG_STATUS);
-	gtk_label_set_text(GTK_LABEL(s), _(text));
-	gtk_label_set_use_markup(GTK_LABEL(s), TRUE);
-	g_free(text);
+	//GtkWidget *s = LKP_MAIN(WDG_STATUS);
+	//fmt_status("[%4d] %s", i, gtk_label_get_text(GTK_LABEL(s)));
 
 	GtkProgressBar *pbar_total = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_TOTAL));
 	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
@@ -4350,6 +4343,11 @@ static gboolean cb_gui_update(gpointer data)
 			gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
 			gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 			enable_all_main_widgets();
+			g_data->action = NO_ACTION;
+			break;
+
+		case ACTION_EJECTING:
+			fmt_status("Trying to eject disc in '%s'...", g_data->device);
 			g_data->action = NO_ACTION;
 			break;
 	}

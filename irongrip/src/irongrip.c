@@ -186,6 +186,8 @@
 #define BOXPACK(box,child,xpand,fill,pad) \
 	gtk_box_pack_start(GTK_BOX(box), child, xpand, fill, pad)
 
+#define GTK_REFRESH while (gtk_events_pending ()) gtk_main_iteration ()
+
 #if GLIB_CHECK_VERSION(2,32,0)
 #define g_thread_create(func, data, join, err) g_thread_new("T", func, data)
 #define g_thread_init(x)
@@ -326,6 +328,7 @@ static gpointer track_thread(gpointer data);
 static int exec_with_output(const char *args[], int toread, pid_t *p);
 static int is_valid_port_number(int number);
 static void disable_all_main_widgets(void);
+static void disable_lookup_widgets(void);
 static void disable_mp3_widgets(void);
 static void dorip_mainthread();
 static void enable_all_main_widgets(void);
@@ -346,11 +349,11 @@ static void set_gui_action(int action) {
 static void wait_action()
 {
 	g_mutex_lock(g_data->monolock);
-	printf("WAITING...\n");
+	// printf("WAITING...\n");
 	while (g_data->action) {
 		g_cond_wait(g_data->updated, g_data->monolock);
 	}
-	printf("DONE!\n");
+	// printf("DONE!\n");
 	g_mutex_unlock(g_data->monolock);
 }
 
@@ -1125,6 +1128,11 @@ static bool check_disc()
 			continue;
 		}
 		drive_opened = true;
+		puts("IOCTL");
+		if(!alreadyGood) {
+			set_status("<b>Reading disc contents...</b>");
+			GTK_REFRESH;
+		}
 		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 		close(fd);
 		if (status == CDS_AUDIO || status == CDS_MIXED) {
@@ -1142,7 +1150,9 @@ static bool check_disc()
 	if (!drive_opened) {
 		set_status("Error: cannot access to the cdrom drive !");
 	} else {
+		Sleep(700);
 		set_status("Please insert an audio disc in the cdrom drive...");
+		disable_lookup_widgets();
 		if (!alreadyCleared) {
 			alreadyCleared = true;
 			clear_widgets();
@@ -1301,8 +1311,6 @@ static cddb_disc_t *read_disc(char *cdrom)
 		return NULL;
 	}
 	cddb_disc_t *disc = NULL;
-
-	// read disc status info
 	int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 	if ((status != CDS_AUDIO) && (status != CDS_MIXED)) {
 		goto end;
@@ -2855,6 +2863,24 @@ static void disable_all_main_widgets(void)
 	disable_widget(WDG_PICK_DISC);
 }
 
+static void disable_lookup_widgets(void)
+{
+	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
+	disable_widget(WDG_DISC);
+	disable_widget(WDG_LBL_GENRE);
+	disable_widget(WDG_LBL_ALBUMTITLE);
+	disable_widget(WDG_LBL_ARTIST);
+	disable_widget(WDG_CDDB);
+	disable_widget(WDG_RIP);
+	disable_widget(WDG_SINGLE_ARTIST);
+	disable_widget(WDG_SINGLE_GENRE);
+	disable_widget(WDG_ALBUM_ARTIST);
+	disable_widget(WDG_ALBUM_GENRE);
+	disable_widget(WDG_ALBUM_TITLE);
+	disable_widget(WDG_ALBUM_YEAR);
+	disable_widget(WDG_PICK_DISC);
+}
+
 static void enable_all_main_widgets(void)
 {
 	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), TRUE);
@@ -3417,6 +3443,7 @@ static void abort_threads()
 	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
 	set_status("Job cancelled.");
+	GTK_REFRESH;
 }
 
 static void on_cancel_clicked(GtkButton *button, gpointer user_data)
@@ -3677,8 +3704,6 @@ static void dorip_mainthread()
 							" Please select at least one track."));
 		return;
 	}
-
-	set_status("Verify album directory...");
 	char *albumdir = parse_format(g_prefs->format_albumdir, 0,
 						albumyear, albumartist, albumtitle, albumgenre, NULL);
 	char *playlist = parse_format(g_prefs->format_playlist, 0,
@@ -3701,8 +3726,6 @@ static void dorip_mainthread()
 	/* END CREATE the album directory */
 
 	if (g_prefs->make_playlist) {
-		set_status("Creating playlists");
-
 		if (g_prefs->rip_wav) {
 			char *filename = make_filename(prefs_get_music_dir(g_prefs),
 											albumdir, playlist, "wav.m3u");
@@ -3730,6 +3753,7 @@ static void dorip_mainthread()
 	disable_all_main_widgets();
 	gtk_widget_show(LKP_MAIN(WDG_RIPPING));
 	gtk_widget_hide(LKP_MAIN(WDG_SCROLL));
+	GTK_REFRESH;
 
 	g_data->ripper = g_thread_create(rip_thread, NULL, TRUE, NULL);
 	g_data->encoder = g_thread_create(encode_thread, NULL, TRUE, NULL);
@@ -4291,7 +4315,7 @@ static gboolean cb_gui_update(gpointer data)
 	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
 	GtkProgressBar *pbar_encode = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_ENCODE));
 	g_mutex_lock(g_data->monolock);
-	printf("ACTION = %d\n", g_data->action);
+	// printf("ACTION = %d\n", g_data->action);
 	switch(g_data->action) {
 		case ACTION_INIT_PBAR:
 			gtk_progress_bar_set_fraction(pbar_total, 0.0);
@@ -4377,10 +4401,10 @@ int main(int argc, char *argv[])
 	gtk_widget_show(win_main);
 	lookup_cdparanoia();
 	// recurring timeout to automatically re-scan cdrom once in a while
-	gdk_threads_add_timeout(10000, idle, (void *)1);
+	gdk_threads_add_timeout(5000, idle, (void *)1);
 	// add an idle event to scan the cdrom drive ASAP
 	gdk_threads_add_idle(scan_on_startup, NULL);
-	gdk_threads_add_timeout(1000, cb_gui_update, NULL);
+	gdk_threads_add_timeout(750, cb_gui_update, NULL);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();

@@ -265,6 +265,7 @@ typedef struct _shared {
 	GMutex *barrier;
 	GMutex *monolock;
 	GThread *cddb_thread;
+	GThread *ioctl_thread;
 	GThread *encoder;
 	GThread *ripper;
 	GThread *tracker;
@@ -282,6 +283,7 @@ typedef struct _shared {
 	gboolean track_format[100];
 	int cddb_matches;
 	int cddb_thread_running;
+	int ioctl_thread_running;
 	int counter;
 	int encode_tracks_completed;
 	int numCdparanoiaFailed;
@@ -1109,6 +1111,13 @@ end:
 	return r;
 }
 
+static gpointer ioctl_thread_run(gpointer data)
+{
+	int status = ioctl((int)data, CDROM_DISC_STATUS, CDSL_CURRENT);
+	g_atomic_int_set(&g_data->ioctl_thread_running, 0);
+	return NULL;
+}
+
 static bool check_disc()
 {
 	static bool alreadyCleared = true; // no clear when program just started
@@ -1128,10 +1137,16 @@ static bool check_disc()
 			continue;
 		}
 		drive_opened = true;
-		puts("IOCTL");
 		if(!alreadyGood) {
 			set_status("<b>Reading disc contents...</b>");
 			GTK_REFRESH;
+		}
+		g_atomic_int_set(&g_data->ioctl_thread_running, 1);
+		g_data->ioctl_thread = g_thread_create(ioctl_thread_run,
+												(gpointer)fd, TRUE, NULL);
+		while (g_atomic_int_get(&g_data->ioctl_thread_running) != 0) {
+			GTK_REFRESH;
+			Sleep(300);
 		}
 		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 		close(fd);
@@ -1275,8 +1290,7 @@ static GList *lookup_disc(cddb_disc_t *disc)
 	gtk_label_set_use_markup(status, TRUE);
 
 	while (g_atomic_int_get(&g_data->cddb_thread_running) != 0) {
-		while (gtk_events_pending())
-			gtk_main_iteration();
+		GTK_REFRESH;
 		Sleep(300);
 	}
 	gtk_label_set_text(status, "CDDB query finished.");

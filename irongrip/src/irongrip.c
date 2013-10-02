@@ -2066,7 +2066,7 @@ static void show_aboutbox(void)
 						NULL };
 
 	gchar* comments = N_("An application to save tracks from an Audio CD"
-							" as WAV and/or MP3.");
+							" as WAV, FLAC and MP3.");
 
 	gchar* copyright = {"Copyright 2005 Eric Lathrop (Asunder)\n"
 						"Copyright 2007 Andrew Smith (Asunder)\n"

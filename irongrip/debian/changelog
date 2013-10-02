@@ -1,3 +1,9 @@
+irongrip (0.6-1) unstable; urgency=low
+
+  * Fix multiple threads causing GTK+ to freeze.
+
+ -- Matt Thirtytwo (LinuxMatt) <matt.59491@gmail.com>  Wed, 02 Oct 2013 22:00:00 +0200
+
 irongrip (0.5-1) unstable; urgency=low
 
   * Add support for FLAC encoding.

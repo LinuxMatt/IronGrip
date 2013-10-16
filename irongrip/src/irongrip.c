@@ -4396,6 +4396,8 @@ static gboolean cb_gui_update(gpointer data)
 
 int main(int argc, char *argv[])
 {
+	g_thread_init(NULL);
+	gdk_threads_init();
 	g_data = g_malloc0(sizeof(shared));
 	g_data->updated = g_cond_new();
 	g_data->monolock = g_mutex_new();
@@ -4407,8 +4409,6 @@ int main(int argc, char *argv[])
 	textdomain(PACKAGE);
 #endif
 	// cddb_log_set_level(CDDB_LOG_DEBUG);
-	g_thread_init(NULL);
-	gdk_threads_init();
 	gtk_init(&argc, &argv);
 	win_main = create_main();
 	win_prefs = create_prefs();

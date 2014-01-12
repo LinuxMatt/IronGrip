@@ -1,58 +1,57 @@
-# French translation for Asunder.
+# Bulgarian translation for Asunder.
 # This file is distributed under the same license as the Asunder package.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Asunder v1.6.x\n"
+"Project-Id-Version: asunder-1.0.2\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2013-12-27 09:02-0500\n"
-"PO-Revision-Date: 2012-05-28 15:10+0100\n"
-"Last-Translator: Clément Raïevsky <c.raievsky@gmail.com>\n"
+"PO-Revision-Date: 2013-03-21 14:47+0200\n"
+"Last-Translator: Emil Krumov <emil_dk@yahoo.com>\n"
 "Language-Team: \n"
 "Language: \n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural= n!=1;\n"
-"X-Poedit-Language: French\n"
-"X-Poedit-Country: FRANCE\n"
+"Plural-Forms: nplurals=1; plural= 0\n"
+"X-Poedit-Country: BULGARIA\n"
 "X-Poedit-SourceCharset: utf-8\n"
 
 #: ../src/main.c:117 ../src/interface.c:233
 msgid "Rip"
-msgstr "Extraire"
+msgstr "Рипване"
 
 #: ../src/main.c:121
 msgid "Track"
-msgstr "Piste"
+msgstr "Песен"
 
 #: ../src/main.c:127
 msgid "Artist"
-msgstr "Artiste"
+msgstr "Изпълнител"
 
 #: ../src/main.c:133
 msgid "Title"
-msgstr "Titre"
+msgstr "Заглавие"
 
 #: ../src/main.c:139
 msgid "Genre"
-msgstr "Genre"
+msgstr "Жанр"
 
 #: ../src/main.c:143
 msgid "Time"
-msgstr "Durée"
+msgstr "Продължителност"
 
 #: ../src/main.c:169
 msgid ""
 "'cdparanoia' was not found in your path. Asunder requires cdparanoia to rip "
 "CDs."
 msgstr ""
-"'cdparanoia' n'a pas été trouvé dans votre PATH. Asunder a besoin de "
-"cdparanoia pour extraire les CDs."
+"'cdparanoia' не беше намерен в указаната пътека. Asunder изисква cdparanoia, "
+"за да рипва CD-та."
 
 #: ../src/main.c:451
 msgid "<b>Getting disc info from the internet...</b>"
-msgstr "<b>Obtention des informations du disque à partir d'internet...</b>"
+msgstr "<b>Получаване на инфо за диска от Интернет...</b>"
 
 #: ../src/callbacks.c:57 ../src/callbacks.c:261 ../src/callbacks.c:289
 #: ../src/callbacks.c:298 ../src/callbacks.c:308 ../src/interface.c:603
@@ -63,7 +62,7 @@ msgstr "%dKbps"
 
 #: ../src/callbacks.c:410
 msgid "No CD is inserted. Please insert a CD into the CD-ROM drive."
-msgstr "Pas de CD inséré. Veuillez insérer un CD dans le lecteur de CD-ROM."
+msgstr "Няма зареден диск. Моля, заредете CD в CD-ROM устройството."
 
 #: ../src/callbacks.c:429 ../src/callbacks.c:454 ../src/callbacks.c:479
 #: ../src/callbacks.c:504 ../src/callbacks.c:530 ../src/callbacks.c:555
@@ -73,60 +72,60 @@ msgid ""
 "%s was not found in your path. Asunder requires it to create %s files. All "
 "%s functionality is disabled."
 msgstr ""
-"%s n'a pas été trouvé dans votre PATH. Asunder en a besoin pour créer les "
-"fichiers %s. Toutes les fonctions %s sont désactivées."
+"%s не беше намерен в указаната пътека. Asunder го изисква, за да създаде %s "
+"файлове. Цялата %s функционалност е изключена."
 
 #: ../src/callbacks.c:702
 msgid "Select all for ripping"
-msgstr "Tout sélectionner pour l'extraction"
+msgstr "Избиране на всички за рипване"
 
 #: ../src/callbacks.c:708
 msgid "Deselect all for ripping"
-msgstr "Tout désélectionner pour l'extraction"
+msgstr "Отхвърляне на всички за рипване"
 
 #: ../src/interface.c:95
 msgid "CDDB Lookup"
-msgstr "Recherche CDDB"
+msgstr "Претърсване на CDDB"
 
 #: ../src/interface.c:147
 msgid "Disc:"
-msgstr "Disque :"
+msgstr "Диск:"
 
 #: ../src/interface.c:153
 msgid "Album Artist:"
-msgstr "Artiste de l'album :"
+msgstr "Изпълнител на албум:"
 
 #: ../src/interface.c:160
 msgid "Album Title:"
-msgstr "Nom de l'album :"
+msgstr "Заглавие на албум:"
 
 #: ../src/interface.c:167
 msgid "Single Artist"
-msgstr "Un seul artiste"
+msgstr "Изпълнител на песен"
 
 #: ../src/interface.c:173
 msgid "Genre / Year:"
-msgstr "Genre / Année :"
+msgstr "Жанр / Година"
 
 #: ../src/interface.c:180
 msgid "Single Genre"
-msgstr "Genre unique"
+msgstr "Жанр на песен"
 
 #: ../src/interface.c:376
 msgid "Preferences"
-msgstr "Préférences"
+msgstr "Предпочитания"
 
 #: ../src/interface.c:393 ../src/interface.c:399
 msgid "Destination folder"
-msgstr "Dossier de destination"
+msgstr "Работна папка"
 
 #: ../src/interface.c:403
 msgid "Create M3U playlist"
-msgstr "Créer une liste de lecture M3U"
+msgstr "Създаване на M3U списък с песни"
 
 #: ../src/interface.c:411
 msgid "CD-ROM device: "
-msgstr "Lecteur de CD-ROM : "
+msgstr "CD-ROM устройство:"
 
 #: ../src/interface.c:420
 msgid ""
@@ -134,17 +133,17 @@ msgid ""
 "Other example: /dev/hdc\n"
 "Other example: /dev/sr0"
 msgstr ""
-"Défaut : /dev/cdrom\n"
-"Autre exemple : /dev/hdc\n"
-"Autre exemple : /dev/sr0"
+"По подразбиране: /dev/cdrom\n"
+"Друг пример: /dev/hdc\n"
+"Друг пример: /dev/sr0"
 
 #: ../src/interface.c:424
 msgid "Eject disc when finished"
-msgstr "Éjecter le disque à la fin"
+msgstr "Изваждане на диска след завършване"
 
 #: ../src/interface.c:432
 msgid "General"
-msgstr "Général"
+msgstr "Общи"
 
 #: ../src/interface.c:452
 msgid ""
@@ -154,28 +153,28 @@ msgid ""
 "%Y - Year (4-digit or \"0\")\n"
 "%T - Song title"
 msgstr ""
-"%A - Artiste\n"
-"%L - Album\n"
-"%N - Numéro de la piste (sur 2 chiffres)\n"
-"%Y - Année (sur 4 chiffres ou \"0\")\n"
-"%T - Titre de la chanson"
+"%A - Изпълнител\n"
+"%L - Албум\n"
+"%N - Номер на песен (двуцифрен)\n"
+"%Y - Година (четири цифри или \"0\")\n"
+"%T - Име на песен"
 
 #: ../src/interface.c:457
 #, fuzzy, c-format
 msgid "%G - Genre"
-msgstr "Genre"
+msgstr "Жанр"
 
 #: ../src/interface.c:472
 msgid "Album directory: "
-msgstr "Répertoire de l'album : "
+msgstr "Директория на албум:"
 
 #: ../src/interface.c:479 ../src/prefs.c:649
 msgid "Playlist file: "
-msgstr "Liste de lecture : "
+msgstr "Файл на списък с песни:"
 
 #: ../src/interface.c:486 ../src/prefs.c:661 ../src/prefs.c:671
 msgid "Music file: "
-msgstr "Fichier musique : "
+msgstr "Музикален файл:"
 
 #: ../src/interface.c:500
 msgid ""
@@ -184,10 +183,10 @@ msgid ""
 "Default: %A - %L\n"
 "Other example: %A/%L"
 msgstr ""
-"Ceci est relatif au dossier de destination (dans l'onglet Général).\n"
-"Peut être vide.\n"
-"Défaut : %A - %L\n"
-"Autre exemple : %A/%L"
+"Това се отнася за работната папка (от табулатора Общи).\n"
+"Може да е празно.\n"
+"По подразбиране: %A - %L\n"
+"Друг пример: %A /%L"
 
 #: ../src/interface.c:512
 msgid ""
@@ -195,9 +194,9 @@ msgid ""
 "Can be blank.\n"
 "Default: %A - %L"
 msgstr ""
-"Ceci sera enregistré dans le répertoire de l'album.\n"
-"Peut être vide.\n"
-"Défaut : %A - %L"
+"Ще бъде запазено в директорията на албума.\n"
+"Може да е празно.\n"
+"По подразбиране: %A - %L"
 
 #: ../src/interface.c:523
 msgid ""
@@ -206,184 +205,180 @@ msgid ""
 "Default: %A - %T\n"
 "Other example: %N - %T"
 msgstr ""
-"Ceci sera enregistré dans le répertoire de l'album.\n"
-"Ne peut pas être vide.\n"
-"Défaut : %A - %T\n"
-"Autre exemple : %N - %T"
+"Ще бъде запазено в директорията на албума.\n"
+"Не може да е празно.\n"
+"По подразбиране: %A - %T\n"
+"Друг пример: %N - %T"
 
 #: ../src/interface.c:528
 msgid "Filename formats"
-msgstr "Formats du nom de fichier"
+msgstr "Формати на файлови имена"
 
 #: ../src/interface.c:533
 msgid "Filenames"
-msgstr "Noms de fichier"
+msgstr "Файлови имена"
 
 #. WAV
 #: ../src/interface.c:552
 msgid "WAV (uncompressed)"
-msgstr "WAV (non compressé)"
+msgstr "WAV (не компресиран)"
 
 #: ../src/interface.c:571
 msgid "Variable bit rate (VBR)"
-msgstr "Débit variable (VBR)"
+msgstr "Променлив битрейт (VBR)"
 
 #: ../src/interface.c:579
 msgid "Better quality for the same size."
-msgstr "Meilleure qualité pour une taille identique."
+msgstr "По-добро качество за същият размер."
 
 #: ../src/interface.c:585 ../src/interface.c:729 ../src/interface.c:814
 #: ../src/interface.c:861
 msgid "Bitrate"
-msgstr "Débit"
+msgstr "Битрейт"
 
 #: ../src/interface.c:600
 msgid ""
 "Higher bitrate is better quality but also bigger file. Most people use "
 "192Kbps."
 msgstr ""
-"Un débit supérieur permet une meilleure qualité mais aussi un plus gros "
-"fichier. La plupart des gens utilisent 192Kbps."
+"По-висок битрейт осигурява по-добро качество, но и по-голям файл. Повечето "
+"потребители използват 192 Kbps."
 
 #: ../src/interface.c:609
 msgid "MP3 (lossy compression)"
-msgstr "MP3 (compression avec perte)"
+msgstr "MP3 (компресиране със загуби)"
 
 #: ../src/interface.c:631 ../src/interface.c:972
 msgid "Quality"
-msgstr "Qualité"
+msgstr "Качество"
 
 #: ../src/interface.c:642
 msgid "Higher quality means bigger file. Default is 6."
-msgstr "Une meilleure qualité engendre un fichier plus gros. Par défault 6."
+msgstr "По-високо качество води до по-голям файл. По подразбиране е 6."
 
 #: ../src/interface.c:644
 msgid "OGG Vorbis (lossy compression)"
-msgstr "OGG Vorbis (compression avec perte)"
+msgstr "OGG Vorbis (компресиране със загуби)"
 
 #: ../src/interface.c:666 ../src/interface.c:780 ../src/interface.c:917
 msgid "Compression level"
-msgstr "Niveau de compression"
+msgstr "Степен на компресиране"
 
 #: ../src/interface.c:677 ../src/interface.c:930
 msgid "This does not affect the quality. Higher number means smaller file."
-msgstr ""
-"Ceci ne modifie pas la qualité. Un nombre plus grand produit un fichier plus "
-"petit."
+msgstr "Не влияе на качеството. По-голямо число означава по-малък файл."
 
 #: ../src/interface.c:679
 msgid "FLAC (lossless compression)"
-msgstr "FLAC (compression sans perte)"
+msgstr "FLAC (компресиране без загуби)"
 
 #: ../src/interface.c:698
 msgid "More formats"
-msgstr "Plus de formats"
+msgstr "Още формати"
 
 #: ../src/interface.c:743
 msgid ""
 "Higher bitrate is better quality but also bigger file. Most people use "
 "160Kbps."
 msgstr ""
-"Un débit supérieur permet une meilleure qualité mais aussi un plus gros "
-"fichier. La plupart des gens utilisent 160Kbps."
+"По-висок битрейт осигурява по-добро качество, но и по-голям файл. Повечето "
+"потребители използват 160 Kbps."
 
 #: ../src/interface.c:751
 msgid "OPUS (lossy compression)"
-msgstr "OPUS (compression avec perte)"
+msgstr "OPUS (компресиране със загуби)"
 
 #: ../src/interface.c:793
 msgid ""
 "This does not affect the quality. Higher number means smaller file. Default "
 "is 1 (recommended)."
 msgstr ""
-"Ceci ne modifie pas la qualité. Un nombre plus grand produit un fichier plus "
-"petit. Par défaut 1 (recommandé)"
+"Не влияе на качеството. По-голямо число означава по-малък файл. По "
+"подразбиране е 1 (препоръчително)."
 
 #: ../src/interface.c:799
 msgid "Hybrid compression"
-msgstr "Compression hybride"
+msgstr "Смесена компресия"
 
 #: ../src/interface.c:808
 msgid ""
 "The format is lossy but a correction file is created for restoring the "
 "lossless original."
 msgstr ""
-"Le format est avec perte mais un fichier de correction est créé pour "
-"restaurer l'original sans perte."
+"Форматът е със загуби, но е създаден корекционен файл за възстановяване на "
+"оригинала без загуби."
 
 #: ../src/interface.c:877
 msgid "Higher bitrate is better quality but also bigger file."
-msgstr ""
-"Un débit supérieur permet une meilleure qualité mais aussi un plus gros "
-"fichier."
+msgstr "По-висок битрейт осигурява по-добро качество, но и по-голям файл."
 
 #: ../src/interface.c:885
 msgid "Musepack (lossy compression)"
-msgstr "Musepack (compression avec perte)"
+msgstr "Musepack (компресиране със загуби)"
 
 #: ../src/interface.c:932
 msgid "Monkey's Audio (lossless compression)"
-msgstr "Monkey's Audio (compression sans perte)"
+msgstr "Monkey's Audio (компресиране без загуби)"
 
 #. END MONKEY
 #: ../src/interface.c:941
 msgid "Proprietary encoders"
-msgstr "Encodeurs Propriétaires"
+msgstr "Патентовани енкодери"
 
 #: ../src/interface.c:985
 msgid "Higher quality means bigger file. Default is 60."
-msgstr "Une meilleure qualité engendre un fichier plus gros. Par défaut 60."
+msgstr "По-високо качество означава по-голям файл. По подразбиране е 60."
 
 #: ../src/interface.c:987
 msgid "AAC (lossy compression, Nero encoder)"
-msgstr "AAC (compression avec perte, encodeur Nero)"
+msgstr "AAC (компресиране със загуби, Nero кодек)"
 
 #. END AAC
 #: ../src/interface.c:996
 msgid "Encode"
-msgstr "Encodeur"
+msgstr "Кодиране"
 
 #: ../src/interface.c:1027
 msgid "Get disc info from the internet automatically"
-msgstr "Obtenir les informations du disque à partir d'internet automatiquement"
+msgstr "Автоматично получаване на инфо за диска от Интернет"
 
 #: ../src/interface.c:1035 ../src/interface.c:1080
 msgid "Server: "
-msgstr "Serveur :"
+msgstr "Сървър:"
 
 #: ../src/interface.c:1045
 msgid "The CDDB server to get disc info from (default is freedb.freedb.org)"
 msgstr ""
-"Le serveur CDDB pour obtenir les informations du disque (par défaut freedb."
-"freedb.org)"
+"CDDB сървър за получаване на инфо за диска (по подразбиране е freedb.freedb."
+"org)"
 
 #: ../src/interface.c:1051 ../src/interface.c:1093
 msgid "Port: "
-msgstr "Port : "
+msgstr "Порт:"
 
 #: ../src/interface.c:1061
 msgid "The CDDB server port (default is 8880)"
-msgstr "Le port du serveur CDDB (par défaut 8880)"
+msgstr "Порт на CDDB сървъра"
 
 #: ../src/interface.c:1067
 msgid "Use an HTTP proxy to connect to the internet"
-msgstr "Utiliser un proxy HTTP pour se connecter à internet"
+msgstr "Използване на HTTP proxy за връзка с Интернет"
 
 #: ../src/interface.c:1111
 msgid "Advanced"
-msgstr "Avancé"
+msgstr "Разширено"
 
 #: ../src/interface.c:1182 ../src/interface.c:1218
 msgid "Ripping"
-msgstr "Extraction"
+msgstr "Рипване"
 
 #: ../src/interface.c:1211
 msgid "Total progress"
-msgstr "Progression totale"
+msgstr "Цялостен напредък"
 
 #: ../src/interface.c:1225
 msgid "Encoding"
-msgstr "Encodage"
+msgstr "Кодиране"
 
 #: ../src/interface.c:1719
 msgid ""
@@ -391,94 +386,76 @@ msgid ""
 "as WAV, MP3, OGG, FLAC, Opus, Wavpack, Musepack, Monkey's Audio, and/or AAC "
 "files."
 msgstr ""
-"Une application pour enregistrer les pistes d'un CD audio \n"
-"aux formats WAV, MP3, OGG, FLAC, Opus, Wavpack, Musepack, Monkey's Audio et "
-"AAC."
+"Приложение за записване на музика от аудио CD \n"
+"във WAV, MP3, OGG, FLAC, Opus, Wavpack, Musepack, Monkey's Audio, и/или AAC "
+"файлове."
 
 #: ../src/interface.c:1762
 #, c-format
 msgid "%d file created successfully"
 msgid_plural "%d files created successfully"
-msgstr[0] "%d fichier a été créé avec succès"
-msgstr[1] "%d fichiers ont été créés avec succès"
+msgstr[0] "%d файлът е създаден успешно"
 
 #: ../src/interface.c:1771
 #, c-format
 msgid "There was an error creating %d file"
 msgid_plural "There was an error creating %d files"
-msgstr[0] "Il y a eu une erreur pendant la création de %d fichier"
-msgstr[1] "Il y a eu une erreur pendant la création de %d fichiers"
+msgstr[0] "Грешка при създаване на %d файла"
 
 #: ../src/prefs.c:648 ../src/prefs.c:660
 #, c-format
 msgid "Invalid characters in the '%s' field"
-msgstr "Caractères invalides dans le champ '%s'"
+msgstr "Невалиден символ в полето '%s'"
 
 #: ../src/prefs.c:670
 #, c-format
 msgid "'%s' cannot be empty"
-msgstr "'%s' ne peut être vide"
+msgstr "'%s' не може да бъде празно"
 
 #: ../src/prefs.c:685
 msgid "Invalid proxy port number"
-msgstr "Numéro de port du proxy invalide"
+msgstr "Невалиден proxy порт"
 
 #: ../src/prefs.c:698
 msgid "Invalid cddb server port number"
-msgstr "Numéro de port du serveur cddb invalide"
+msgstr "Невалиден порт на CDDB сървъра"
 
 #: ../src/support.c:47
 msgid "Overwrite?"
-msgstr "Écraser ?"
+msgstr "Презаписване?"
 
 #: ../src/support.c:60
 #, c-format
 msgid "The file '%s' already exists. Do you want to overwrite it?\n"
-msgstr "Le fichier '%s' existe déjà. Voulez-vous l'écraser?\n"
+msgstr "Файлът '%s' вече съществува. Да бъде ли презаписан?\n"
 
 #: ../src/support.c:66
 msgid "Remember the answer for _all the files made from this CD"
-msgstr ""
-"Se rappeler de la réponse pour tous les fichiers créés à partir de ce CD"
+msgstr "Помни отговора за всички файлове създадени от това CD"
 
 #: ../src/threads.c:182
 msgid ""
 "No ripping/encoding method selected. Please enable one from the "
 "'Preferences' menu."
 msgstr ""
-"Pas de méthode d'extraction/d'encodage sélectionnée. Veuillez en activer une "
-"dans le menu 'Préférences'."
+"Не е избран метод за рипване/кодиране. Моля изберете някой от меню "
+"'Предпочитания'."
 
 #: ../src/threads.c:211
 msgid ""
 "No tracks were selected for ripping/encoding. Please select at least one "
 "track."
 msgstr ""
-"Pas de pistes sélectionnées pour l'extraction/l'encodage. Veuillez en "
-"sélectionner au moins une."
+"Няма избрани песни за рипване/кодиране. Моля, изберете поне една песен."
 
 #: ../src/threads.c:1043 ../src/threads.c:1045 ../src/threads.c:1049
 msgid "Waiting..."
-msgstr "Patientez..."
+msgstr "Изчакване..."
 
 #, fuzzy
 #~ msgid ""
 #~ "%s was not found in your path. Asunder requires it to create %s files.All "
 #~ "%s functionality is disabled."
 #~ msgstr ""
-#~ "%s n'a pas été trouvé dans votre PATH. Asunder en a besoin pour créer les "
-#~ "fichiers %s. Toutes les fonctions %s sont désactivées."
-
-#, fuzzy
-#~ msgid "Playlist file"
-#~ msgstr "Liste de lecture : "
-
-#, fuzzy
-#~ msgid "Music file"
-#~ msgstr "Fichier musique : "
-
-#~ msgid "Create directory for each album"
-#~ msgstr "Créer un répertoire pour chaque album"
-
-#~ msgid "These characters will be removed from all filenames."
-#~ msgstr "Ces caractères seront supprimés de tous les noms de fichier"
+#~ "%s не беше намерен в указаната пътека. Asunder го изисква, за да създаде "
+#~ "%s файлове. Цялата %s функционалност е изключена."

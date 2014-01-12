@@ -1,3 +1,10 @@
+irongrip (0.7-1) unstable; urgency=low
+
+  * Add support for XDG_CACHE_DIR.
+  * Add translations from Asunder 2.4.
+
+ -- Matt Thirtytwo (LinuxMatt) <matt.59491@gmail.com>  Mon, 06 Jan 2014 21:50:00 +0200
+
 irongrip (0.6-1) unstable; urgency=low
 
   * Fix multiple threads causing GTK+ to freeze.

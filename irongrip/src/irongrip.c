@@ -214,6 +214,8 @@ enum {
 	ACTION_EJECTING
 };
 
+enum { FLAC, LAME };
+
 #define SZENTRY 256
 
 static void szcopy(char dst[SZENTRY], const gchar *src)
@@ -264,6 +266,7 @@ typedef struct _shared {
 	gchar device[128]; // current cdrom device
 	GMutex *barrier;
 	GMutex *monolock;
+	GMutex *guilock;
 	GThread *cddb_thread;
 	GThread *ioctl_thread;
 	GThread *encoder;
@@ -342,22 +345,6 @@ static void set_status(char *text);
 static void fmt_status(const char *fmt, ...);
 static void set_widgets_from_prefs(prefs *p);
 static void sigchld();
-
-static void set_gui_action(int action) {
-	g_mutex_lock(g_data->monolock);
-	g_data->action = action;
-	g_mutex_unlock(g_data->monolock);
-}
-static void wait_action()
-{
-	g_mutex_lock(g_data->monolock);
-	// printf("WAITING...\n");
-	while (g_data->action) {
-		g_cond_wait(g_data->updated, g_data->monolock);
-	}
-	// printf("DONE!\n");
-	g_mutex_unlock(g_data->monolock);
-}
 
 static s_drive* new_drive()
 {
@@ -514,6 +501,34 @@ static void log_gen(const char *func_name, int log_level, const char *fmt, ...)
 	va_end(args);
 	fflush(fd);
 	if(fd==stderr) printf("\n");
+}
+
+static gchar *action2str(int action) {
+	switch(action) {
+		case NO_ACTION: return "NO_ACTION";
+		case ACTION_INIT_PBAR: return "ACTION_INIT_PBAR";
+		case ACTION_UPDATE_PBAR: return "ACTION_UPDATE_PBAR";
+		case ACTION_READY: return "ACTION_READY";
+		case ACTION_COMPLETION: return "ACTION_COMPLETION";
+		case ACTION_ENCODED: return "ACTION_ENCODED";
+		case ACTION_EJECTING: return "ACTION_EJECTING";
+	}
+	return "UNKNOWN_ACTION";
+}
+static void set_gui_action(int action, gboolean wait) {
+	g_mutex_lock(g_data->guilock);
+	g_mutex_lock(g_data->monolock);
+	TRACEINFO("set_gui_action (%d/%s)", action, action2str(action));
+	g_data->action = action;
+	if(wait) {
+		while (g_data->action) {
+			TRACEINFO("set_gui_action WAIT");
+			g_cond_wait(g_data->updated, g_data->monolock);
+		}
+	}
+	TRACEINFO("set_gui_action DONE");
+	g_mutex_unlock(g_data->monolock);
+	g_mutex_unlock(g_data->guilock);
 }
 
 static int get_field(char *buf, char *filename, char *field, char **value)
@@ -1113,7 +1128,7 @@ end:
 
 static gpointer ioctl_thread_run(gpointer data)
 {
-	int status = ioctl((int)data, CDROM_DISC_STATUS, CDSL_CURRENT);
+	int status = ioctl(GPOINTER_TO_INT(data), CDROM_DISC_STATUS, CDSL_CURRENT);
 	g_atomic_int_set(&g_data->ioctl_thread_running, 0);
 	return NULL;
 }
@@ -1143,10 +1158,10 @@ static bool check_disc()
 		}
 		g_atomic_int_set(&g_data->ioctl_thread_running, 1);
 		g_data->ioctl_thread = g_thread_create(ioctl_thread_run,
-												(gpointer)fd, TRUE, NULL);
+											GINT_TO_POINTER(fd), TRUE, NULL);
 		while (g_atomic_int_get(&g_data->ioctl_thread_running) != 0) {
 			GTK_REFRESH;
-			Sleep(300);
+			Sleep(200);
 		}
 		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 		close(fd);
@@ -1254,11 +1269,30 @@ static gpointer cddb_thread_run(gpointer data)
 		g_data->cddb_matches = 0;
 
 	// cddb_disc_print(g_data->cddb_disc);
+
+	// make a list of all the matches
+	g_data->disc_matches = NULL;
+	for (int i = 0; i < g_data->cddb_matches; i++) {
+		cddb_disc_t *match = cddb_disc_clone(g_data->cddb_disc);
+		if (!cddb_read(g_data->cddb_conn, match)) {
+			cddb_error_print(cddb_errno(g_data->cddb_conn));
+			TRACERROR("cddb_read() failed.");
+			break;
+		}
+		// cddb_disc_print(match);
+		g_data->disc_matches = g_list_append(g_data->disc_matches, match);
+
+		// move to next match
+		if (i < g_data->cddb_matches - 1) {
+			if (!cddb_query_next(g_data->cddb_conn, g_data->cddb_disc))
+				fatalError("Query index out of bounds.");
+		}
+	}
 	g_atomic_int_set(&g_data->cddb_thread_running, 0);
 	return NULL;
 }
 
-static GList *lookup_disc(cddb_disc_t *disc)
+static void lookup_disc(cddb_disc_t *disc)
 {
 	// set up the connection to the cddb server
 	g_data->cddb_conn = cddb_new();
@@ -1291,30 +1325,12 @@ static GList *lookup_disc(cddb_disc_t *disc)
 
 	while (g_atomic_int_get(&g_data->cddb_thread_running) != 0) {
 		GTK_REFRESH;
-		Sleep(300);
+		Sleep(200);
 	}
 	gtk_label_set_text(status, "CDDB query finished.");
 	enable_all_main_widgets();
 
-	// make a list of all the matches
-	GList *matches = NULL;
-	for (int i = 0; i < g_data->cddb_matches; i++) {
-		cddb_disc_t *possible_match = cddb_disc_clone(disc);
-		if (!cddb_read(g_data->cddb_conn, possible_match)) {
-			cddb_error_print(cddb_errno(g_data->cddb_conn));
-			fatalError("cddb_read() failed.");
-		}
-		// cddb_disc_print(possible_match);
-		matches = g_list_append(matches, possible_match);
-
-		// move to next match
-		if (i < g_data->cddb_matches - 1) {
-			if (!cddb_query_next(g_data->cddb_conn, disc))
-				fatalError("Query index out of bounds.");
-		}
-	}
 	cddb_destroy(g_data->cddb_conn);
-	return matches;
 }
 
 static cddb_disc_t *read_disc(char *cdrom)
@@ -1523,7 +1539,7 @@ static bool refresh(int force)
 	if (!g_prefs->do_cddb_updates && !force)
 		return true;
 
-	g_data->disc_matches = lookup_disc(disc);
+	lookup_disc(disc);
 	cddb_disc_destroy(disc);
 	if (g_data->disc_matches == NULL) {
 		TRACEWARN("No disc matches !");
@@ -1935,9 +1951,43 @@ static void on_window_close(GtkWidget *widget, GdkEventFocus *event,
 	gtk_main_quit();
 }
 
+static bool mkdir_p(char *path) {
+	if(is_directory(path)) return TRUE;
+	if(g_file_test(path, G_FILE_TEST_IS_REGULAR)) return FALSE;
+	mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
+	int rc = g_mkdir_with_parents(path, mode);
+	if(rc != 0 && errno != EEXIST) {
+		perror("g_mkdir_with_parents");
+		return FALSE;
+	}
+	return TRUE;
+}
+
+static gchar* get_cache_path(const gchar *filename, gboolean create_dirs)
+{
+	g_assert(filename != NULL);
+
+	const gchar *cache = g_getenv("XDG_CACHE_HOME");
+	gchar *dir= NULL;
+	gchar *fullpath = NULL;
+	if (cache == NULL) {
+		const gchar *home = g_getenv("HOME");
+		dir = g_strdup_printf("%s/.cache/%s", home, PACKAGE);
+	} else {
+		dir = g_strdup_printf("%s/%s", cache, PACKAGE);;
+	}
+	if(create_dirs && !mkdir_p(dir)) {
+		goto cleanup;
+	}
+	fullpath = g_strdup_printf("%s/%s", dir, filename);
+cleanup:
+	g_free(dir);
+	return fullpath;
+}
+
 static void read_completion_file(GtkListStore *list, const char *name)
 {
-	gchar *file = get_config_path(name);
+	gchar *file = get_cache_path(name,false);
 	if(!file) {
 		TRACEWARN("could not get completion file path: %s", strerror(errno));
 		return;
@@ -2009,7 +2059,7 @@ static void save_completion(GtkWidget *entry)
 	const gchar *name = g_object_get_data(G_OBJECT(entry), COMPLETION_NAME_KEY);
 	if (name == NULL) return;
 
-	gchar *file = get_config_path(name);
+	gchar *file = get_cache_path(name,true);
 	if(!file) {
 		TRACEWARN("could not get completion file path: %s", strerror(errno));
 		return;
@@ -3141,23 +3191,17 @@ static void get_prefs_from_widgets(prefs *p)
 	p->cddb_port= atoi(GET_PREF_TEXT("cddb_port"));
 }
 
-static bool mkdir_p(char *path) {
-	if(is_directory(path)) return TRUE;
-	if(g_file_test(path, G_FILE_TEST_IS_REGULAR)) return FALSE;
-	mode_t mode = S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH;
-	int rc = g_mkdir_with_parents(path, mode);
-	if(rc != 0 && errno != EEXIST) {
-		perror("g_mkdir_with_parents");
-		return FALSE;
-	}
-	return TRUE;
-}
-
 static gchar* get_config_path(const gchar *file_suffix)
 {
 	gchar *filename = NULL;
+	gchar *path = NULL;
 	const gchar *home = g_getenv("HOME");
-	gchar *path = g_strdup_printf("%s/.config/%s", home, PACKAGE);
+	const gchar *xch = g_getenv("XDG_CONFIG_HOME");
+	if(xch == NULL || *xch == '\0') {
+		path = g_strdup_printf("%s/.config/%s", home, PACKAGE);
+	} else {
+		path = g_strdup_printf("%s/%s", xch, PACKAGE);
+	}
 	if(!mkdir_p(path)) {
 		goto cleanup;
 	}
@@ -3441,7 +3485,7 @@ static void abort_threads()
     while (g_data->cdparanoia_pid != 0
 			|| g_data->lame_pid != 0
 			|| g_data->flac_pid != 0) {
-        Sleep(300);
+        Sleep(200);
 		TRACEINFO("cdparanoia=%d lame=%d flac=%d", g_data->cdparanoia_pid,
 										g_data->lame_pid, g_data->flac_pid);
     }
@@ -3545,7 +3589,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 			sscanf(buf, "\t to sector %d", &end);
 		} else if (buf[0] == '#') {
 			int code;
-			char type[20];
+			char type[200];
 			sscanf(buf, "##: %d %s @ %d", &code, type, &sector);
 			sector /= 1176;
 			if (strncmp("[wrote]", type, 7) == 0) {
@@ -3557,7 +3601,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 	} while (size > 0);
 
 cleanup:
-	TRACEINFO("End of ripping track %d", tracknum);
+	TRACEINFO("End of ripping track %d / %f %%", tracknum, g_data->rip_percent);
 	close(fd);
 	sigchld();
 	//  don't go on until the signal for the previous call is handled
@@ -3646,7 +3690,7 @@ static gpointer rip_thread(gpointer data)
 	}
 	// no more tracks to rip, safe to eject
 	if (g_prefs->eject_on_done) {
-		set_gui_action(ACTION_EJECTING);
+		set_gui_action(ACTION_EJECTING, true);
 		eject_disc(g_data->device);
 	}
 	return NULL;
@@ -3774,6 +3818,52 @@ static void dorip_mainthread()
 	g_data->tracker = g_thread_create(track_thread, NULL, TRUE, NULL);
 }
 
+static void read_from_encoder(int encoder, int fd)
+{
+	int size = 0;
+	do {
+		char buf[256];
+		int pos = -1;
+		do {
+			pos++;
+			size = read(fd, &buf[pos], 1);
+			/* signal interrupted read(), try again */
+			if (size == -1 && errno == EINTR) {
+				pos--;
+				size = 1;
+			}
+		} while ((buf[pos] != '\r') && (buf[pos] != '\n')
+							&& (size > 0) && (pos < 256));
+		buf[pos] = '\0';
+
+		int sector;
+		switch(encoder) {
+			case FLAC:
+				{
+					for (; pos>0; pos--) {
+						if (buf[pos] == ':') {
+							pos++;
+							break;
+						}
+					}
+					if (sscanf(&buf[pos], "%d%%", &sector) == 1) {
+						g_data->flac_percent = (double)sector/100;
+					}
+				}
+				break;
+
+			case LAME:
+				{
+					int end;
+					if (sscanf(buf, "%d/%d", &sector, &end) == 2) {
+						g_data->mp3_percent = (double)sector / end;
+					}
+				}
+				break;
+		}
+	} while (size > 0);
+}
+
 static void lamehq(int tracknum, char *artist, char *album, char *title,
 				char *genre, char *year, char *wavfilename, char *mp3filename)
 {
@@ -3802,8 +3892,8 @@ static void lamehq(int tracknum, char *artist, char *album, char *title,
 	snprintf(br_txt, 8, "%d", bitrate);
 	args[pos++] = br_txt;
 
-	char tr_txt[3];
-	snprintf(tr_txt, 3, "%d", tracknum);
+	char tr_txt[4];
+	snprintf(tr_txt, 4, "%d", tracknum);
 	if ((tracknum > 0) && (tracknum < 100)) {
 		args[pos++] = "--tn";
 		args[pos++] = tr_txt;
@@ -3835,29 +3925,7 @@ static void lamehq(int tracknum, char *artist, char *album, char *title,
 	args[pos++] = NULL;
 
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->lame_pid);
-	int size = 0;
-	do {
-		char buf[256];
-		pos = -1;
-		do {
-			pos++;
-			size = read(fd, &buf[pos], 1);
-
-			/* signal interrupted read(), try again */
-			if (size == -1 && errno == EINTR) {
-				pos--;
-				size = 1;
-			}
-		} while ((buf[pos] != '\r') && (buf[pos] != '\n')
-								&& (size > 0) && (pos < 256));
-		buf[pos] = '\0';
-
-		int sector;
-		int end;
-		if (sscanf(buf, "%d/%d", &sector, &end) == 2) {
-			g_data->mp3_percent = (double)sector / end;
-		}
-	} while (size > 0);
+	read_from_encoder(LAME, fd);
 	close(fd);
 	Sleep(200);
 	sigchld();
@@ -3900,7 +3968,7 @@ static void flac(int tracknum, char *artist, char *album, char *title,
 	char compression_level_text[3];
 	snprintf(compression_level_text, 3, "-%d", compression_level);
 	char tracknum_text[19];
-	snprintf(tracknum_text, 15, "TRACKNUMBER=%d", tracknum);
+	snprintf(tracknum_text, 18, "TRACKNUMBER=%d", tracknum);
 
 	gchar *artist_text = make_flac_arg("ARTIST", artist);
 	gchar *album_text = make_flac_arg("ALBUM", album);
@@ -3927,33 +3995,7 @@ static void flac(int tracknum, char *artist, char *album, char *title,
 	args[pos++] = NULL;
 
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->flac_pid);
-	char buf[256];
-	int size;
-	do {
-		pos = -1;
-		do {
-			pos++;
-			size = read(fd, &buf[pos], 1);
-			/* signal interrupted read(), try again */
-			if (size == -1 && errno == EINTR) {
-				pos--;
-				size = 1;
-			}
-		} while ((buf[pos] != '\r') && (buf[pos] != '\n')
-							&& (size > 0) && (pos < 256));
-		buf[pos] = '\0';
-		for (; pos>0; pos--) {
-			if (buf[pos] == ':') {
-				pos++;
-				break;
-			}
-		}
-		int sector;
-		if (sscanf(&buf[pos], "%d%%", &sector) == 1) {
-			g_data->flac_percent = (double)sector/100;
-		}
-	} while (size > 0);
-
+	read_from_encoder(FLAC, fd);
 	close(fd);
 	g_free(artist_text);
 	g_free(album_text);
@@ -4077,8 +4119,7 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 // the thread that handles encoding WAV files to all other formats
 static gpointer encode_thread(gpointer data)
 {
-	set_gui_action(ACTION_COMPLETION);
-	wait_action();
+	set_gui_action(ACTION_COMPLETION, true);
 
 	gboolean single_artist = get_main_toggle(WDG_SINGLE_ARTIST);
 	gboolean single_genre = get_main_toggle(WDG_SINGLE_GENRE);
@@ -4150,14 +4191,12 @@ static gpointer encode_thread(gpointer data)
 			|| g_data->lame_pid != 0
 			|| g_data->flac_pid != 0) {
 		// printf("w2\n");
-		Sleep(300);
+		Sleep(200);
 	}
-	Sleep(200);
 	TRACEINFO("Waking up to allDone");
 	g_data->allDone = true;		// so the tracker thread will exit
 	g_data->working = false;
-	set_gui_action(ACTION_ENCODED);
-	wait_action();
+	set_gui_action(ACTION_ENCODED, true);
 	return NULL;
 }
 
@@ -4168,8 +4207,7 @@ static gpointer track_thread(gpointer data)
 	if (g_prefs->rip_mp3) g_data->parts++;
 	if (g_prefs->rip_flac) g_data->parts++;
 
-	set_gui_action(ACTION_INIT_PBAR);
-	wait_action();
+	set_gui_action(ACTION_INIT_PBAR, true);
 
 	int torip;
 	int completed;
@@ -4178,7 +4216,7 @@ static gpointer track_thread(gpointer data)
 	g_data->pencode = 0;
 	g_data->ptotal = 0.0;
 
-	while (!g_data->allDone && g_data->ptotal < 1.0) {
+	while (!g_data->allDone) {
 		if (g_data->aborted) {
 			TRACEWARN("Aborted 1");
 			g_thread_exit(NULL);
@@ -4187,7 +4225,7 @@ static gpointer track_thread(gpointer data)
 			&& (g_data->parts == 1
 				|| g_data->flac_percent <= 0.0
 				|| g_data->mp3_percent <= 0.0)) {
-			Sleep(400);
+			Sleep(200);
 			continue;
 		}
 		started = true;
@@ -4223,13 +4261,10 @@ static gpointer track_thread(gpointer data)
 			TRACEWARN("Aborted 2");
 			g_thread_exit(NULL);
 		}
-		set_gui_action(ACTION_UPDATE_PBAR);
+		set_gui_action(ACTION_UPDATE_PBAR, false);
 		Sleep(200);
 	}
-
-	set_gui_action(ACTION_READY);
-	wait_action();
-
+	set_gui_action(ACTION_READY, true);
 	TRACEINFO("The End.");
 	return NULL;
 }
@@ -4329,7 +4364,8 @@ static gboolean cb_gui_update(gpointer data)
 	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
 	GtkProgressBar *pbar_encode = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_ENCODE));
 	g_mutex_lock(g_data->monolock);
-	// printf("ACTION = %d\n", g_data->action);
+	if(g_data->action != NO_ACTION)
+		TRACEINFO("cb_gui_update (%d/%s)", g_data->action, action2str(g_data->action));
 	switch(g_data->action) {
 		case ACTION_INIT_PBAR:
 			gtk_progress_bar_set_fraction(pbar_total, 0.0);
@@ -4401,6 +4437,7 @@ int main(int argc, char *argv[])
 	g_data = g_malloc0(sizeof(shared));
 	g_data->updated = g_cond_new();
 	g_data->monolock = g_mutex_new();
+	g_data->guilock = g_mutex_new();
 	load_prefs();
 	log_init();
 #ifdef ENABLE_NLS
@@ -4418,12 +4455,13 @@ int main(int argc, char *argv[])
 	gdk_threads_add_timeout(5000, idle, (void *)1);
 	// add an idle event to scan the cdrom drive ASAP
 	gdk_threads_add_idle(scan_on_startup, NULL);
-	gdk_threads_add_timeout(750, cb_gui_update, NULL);
+	gdk_threads_add_timeout(400, cb_gui_update, NULL);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();
 	g_cond_free(g_data->updated);
 	g_mutex_free(g_data->monolock);
+	g_mutex_free(g_data->guilock);
 	g_free(g_data);
 	libcddb_shutdown();
 	return 0;

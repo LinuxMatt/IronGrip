@@ -2,7 +2,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.59])
 AC_INIT(configure.ac)
-AM_INIT_AUTOMAKE(irongrip, 0.6)
+AM_INIT_AUTOMAKE(irongrip, 0.7)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 IT_PROG_INTLTOOL([0.34.90])
@@ -39,7 +39,7 @@ AC_DEFINE_UNQUOTED(PIXMAPDIR,"$PIXMAPDIR", [Pictures directory.])
 
 AM_GLIB_GNU_GETTEXT
 
-CFLAGS="-DDEBUG -O0 -ggdb -Wall -pedantic -std=gnu99"
+CFLAGS="-DDEBUG -O0 -ggdb -Wall -std=gnu99"
 
 AC_DEFINE([PROGRAM_NAME], ["IronGrip"], ["Program name"])
 

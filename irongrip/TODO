@@ -13,6 +13,8 @@ Normal priority:
 ---------------
 * Find help to make packages for many Linux distributions (Fedora, Slackware...)
 * Find help to translate irongrip
+* Replace maintainer-build.sh with autogen.sh
+* Add support for OGG Vorbis
 
 Lower priority:
 ---------------

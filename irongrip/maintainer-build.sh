@@ -12,6 +12,7 @@ ACTION=$1
 make maintainer-clean
 make clean
 # EXTRA CLEANUP
+rm config.h.in~ 2> /dev/null
 rm -r autom4te.cache 2> /dev/null
 rm Makefile 2> /dev/null
 rm Makefile.in 2> /dev/null

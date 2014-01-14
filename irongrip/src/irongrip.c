@@ -518,15 +518,15 @@ static gchar *action2str(int action) {
 static void set_gui_action(int action, gboolean wait) {
 	g_mutex_lock(g_data->guilock);
 	g_mutex_lock(g_data->monolock);
-	TRACEINFO("set_gui_action (%d/%s)", action, action2str(action));
 	g_data->action = action;
 	if(wait) {
+		TRACEINFO("set_gui_action (%d/%s)", action, action2str(action));
 		while (g_data->action) {
 			TRACEINFO("set_gui_action WAIT");
 			g_cond_wait(g_data->updated, g_data->monolock);
 		}
+		TRACEINFO("set_gui_action DONE");
 	}
-	TRACEINFO("set_gui_action DONE");
 	g_mutex_unlock(g_data->monolock);
 	g_mutex_unlock(g_data->guilock);
 }
@@ -1128,7 +1128,7 @@ end:
 
 static gpointer ioctl_thread_run(gpointer data)
 {
-	int status = ioctl(GPOINTER_TO_INT(data), CDROM_DISC_STATUS, CDSL_CURRENT);
+	/*int status =*/ ioctl(GPOINTER_TO_INT(data), CDROM_DISC_STATUS, CDSL_CURRENT);
 	g_atomic_int_set(&g_data->ioctl_thread_running, 0);
 	return NULL;
 }
@@ -3823,6 +3823,7 @@ static void read_from_encoder(int encoder, int fd)
 	int size = 0;
 	do {
 		char buf[256];
+		memset(buf,0,256);
 		int pos = -1;
 		do {
 			pos++;
@@ -3840,14 +3841,17 @@ static void read_from_encoder(int encoder, int fd)
 		switch(encoder) {
 			case FLAC:
 				{
+					int i=0;
+					while(buf[i] == 0x08 && i < pos) i++;
 					for (; pos>0; pos--) {
 						if (buf[pos] == ':') {
 							pos++;
 							break;
 						}
 					}
-					if (sscanf(&buf[pos], "%d%%", &sector) == 1) {
+					if (sscanf(buf, "%d%%", &sector) == 1) {
 						g_data->flac_percent = (double)sector/100;
+						TRACEINFO("FLAC PERCENT=[%.4f]", g_data->flac_percent);
 					}
 				}
 				break;
@@ -3997,6 +4001,7 @@ static void flac(int tracknum, char *artist, char *album, char *title,
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->flac_pid);
 	read_from_encoder(FLAC, fd);
 	close(fd);
+	g_data->flac_percent = 1.0;
 	g_free(artist_text);
 	g_free(album_text);
 	g_free(title_text);
@@ -4254,6 +4259,8 @@ static gpointer track_thread(gpointer data)
 			g_data->ptotal = g_data->prip / g_data->parts
 								+ g_data->pencode * (g_data->parts - 1)
 								/ g_data->parts;
+
+			TRACEINFO("prip=%.4f pencode=%.4f ptotal=%.4f", g_data->prip, g_data->pencode, g_data->ptotal);
 		} else {
 			g_data->ptotal = g_data->prip;
 		}
@@ -4357,15 +4364,17 @@ static gboolean cb_gui_update(gpointer data)
 	static int i = 0;
 	i++;
 
+	g_mutex_lock(g_data->monolock);
+	if(g_data->action == NO_ACTION)
+		goto unlock;
+
 	//GtkWidget *s = LKP_MAIN(WDG_STATUS);
 	//fmt_status("[%4d] %s", i, gtk_label_get_text(GTK_LABEL(s)));
 
 	GtkProgressBar *pbar_total = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_TOTAL));
 	GtkProgressBar *pbar_rip = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_RIP));
 	GtkProgressBar *pbar_encode = GTK_PROGRESS_BAR(LKP_MAIN(WDG_PROGRESS_ENCODE));
-	g_mutex_lock(g_data->monolock);
-	if(g_data->action != NO_ACTION)
-		TRACEINFO("cb_gui_update (%d/%s)", g_data->action, action2str(g_data->action));
+	//TRACEINFO("cb_gui_update (%d/%s)", g_data->action, action2str(g_data->action));
 	switch(g_data->action) {
 		case ACTION_INIT_PBAR:
 			gtk_progress_bar_set_fraction(pbar_total, 0.0);
@@ -4426,6 +4435,7 @@ static gboolean cb_gui_update(gpointer data)
 			break;
 	}
 	g_cond_signal(g_data->updated);
+unlock:
 	g_mutex_unlock(g_data->monolock);
 	return TRUE;
 }

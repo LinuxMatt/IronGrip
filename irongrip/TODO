@@ -3,10 +3,11 @@ TODO
 
 Higher priority:
 ----------------
-* use --best for flac compression
+* fix flac output analysis, percentage scanning is not always accurate
+* use --best for flac compression (-8 is equivalent)
 * fix encoding failures with flac
 * fix sigchld for flac
-* .cddbslave multiple matches not working (maybe a bug in libcddb)
+* .cddbslave multiple matches not working (bug in libcddb)
 * when cdrom drive is changed in preferences, scan again asap
 
 Normal priority:
@@ -16,6 +17,9 @@ Normal priority:
 * Replace maintainer-build.sh with autogen.sh
 * Add support for OGG Vorbis
 * Add support for libmusicbrainz
+* Add AM_SILENT_RULES([yes])
+* Add option named Cdparanoia fast mode (-Z)
+* Add option to "Always overwrite files"
 
 Lower priority:
 ---------------

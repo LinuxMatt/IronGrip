@@ -3823,6 +3823,7 @@ static void read_from_encoder(int encoder, int fd)
 	int size = 0;
 	do {
 		char buf[256];
+		char *p = buf;
 		memset(buf,0,256);
 		int pos = -1;
 		do {
@@ -3833,23 +3834,26 @@ static void read_from_encoder(int encoder, int fd)
 				pos--;
 				size = 1;
 			}
-		} while ((buf[pos] != '\r') && (buf[pos] != '\n')
+		} while ((buf[pos] != '\r') && (buf[pos] != '\n') && (buf[pos] != 0x08)
 							&& (size > 0) && (pos < 256));
 		buf[pos] = '\0';
+
+		while(*p==0x08) p++;
+		if(*p==0 && size>0) continue;
+		// printf("LINE=%s\n", p);
 
 		int sector;
 		switch(encoder) {
 			case FLAC:
 				{
-					int i=0;
-					while(buf[i] == 0x08 && i < pos) i++;
 					for (; pos>0; pos--) {
 						if (buf[pos] == ':') {
 							pos++;
+							// p = pos; // TODO
 							break;
 						}
 					}
-					if (sscanf(buf, "%d%%", &sector) == 1) {
+					if (sscanf(p, "%d%%", &sector) == 1) {
 						g_data->flac_percent = (double)sector/100;
 						TRACEINFO("FLAC PERCENT=[%.4f]", g_data->flac_percent);
 					}
@@ -4260,7 +4264,7 @@ static gpointer track_thread(gpointer data)
 								+ g_data->pencode * (g_data->parts - 1)
 								/ g_data->parts;
 
-			TRACEINFO("prip=%.4f pencode=%.4f ptotal=%.4f", g_data->prip, g_data->pencode, g_data->ptotal);
+			// TRACEINFO("prip=%.4f pencode=%.4f ptotal=%.4f", g_data->prip, g_data->pencode, g_data->ptotal);
 		} else {
 			g_data->ptotal = g_data->prip;
 		}

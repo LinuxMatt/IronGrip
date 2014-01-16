@@ -3872,27 +3872,32 @@ static void read_from_encoder(int encoder, int fd)
 		// printf("LINE=%s\n", p);
 
 		int sector;
+		gchar *s;
 		switch(encoder) {
 			case FLAC:
 				{
-					for (; pos>0; pos--) {
-						if (buf[pos] == ':') {
-							pos++;
-							// p = pos; // TODO
-							break;
-						}
+					s = g_strrstr(p, "% complete,");
+					if(!s) continue;
+					*s=0;
+					for(s=s-2; s>p; s--) {
+					   if(*s==':') p=s+1;
 					}
 					if (sscanf(p, "%d%%", &sector) == 1) {
 						g_data->flac_percent = (double)sector/100;
-						TRACEINFO("FLAC PERCENT=[%.4f]", g_data->flac_percent);
 					}
 				}
 				break;
 
 			case LAME:
 				{
+					s = g_strrstr(p, ")|");
+					if(!s) continue;
+					*s=0;
+					for(s=s-1; s>p; s--) {
+					   if(*s=='(') *s=0;
+					}
 					int end;
-					if (sscanf(buf, "%d/%d", &sector, &end) == 2) {
+					if (sscanf(p, "%d/%d", &sector, &end) == 2) {
 						g_data->mp3_percent = (double)sector / end;
 					}
 				}

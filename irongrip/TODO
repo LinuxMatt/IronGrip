@@ -3,8 +3,6 @@ TODO
 
 Higher priority:
 ----------------
-* fix flac output analysis, percentage scanning is not always accurate
-* use --best for flac compression (-8 is equivalent)
 * fix encoding failures with flac
 * fix sigchld for flac
 * .cddbslave multiple matches not working (bug in libcddb)
@@ -17,11 +15,11 @@ Normal priority:
 * Replace maintainer-build.sh with autogen.sh
 * Add support for OGG Vorbis
 * Add support for libmusicbrainz
-* Add option named Cdparanoia fast mode (-Z)
 
 Lower priority:
 ---------------
 * Enable logging on console (stderr)
+* use --best for flac compression (-8 is still equivalent)
 * Fix log output format
 * Fix GTK+ requirement in doc and configure.ac
   - IronGrip does not compile on Slackware 10.2 because GTK+ is too old (2.6.10).
@@ -33,4 +31,5 @@ Done in next branch
 * Add option to "Always overwrite files"
 * Add AM_SILENT_RULES([yes])
 * log filename is /tmp/irongrip.$USER.log
-
+* Add option named Cdparanoia fast mode (-Z)
+* fix flac output analysis, percentage scanning is not always accurate

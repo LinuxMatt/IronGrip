@@ -245,6 +245,7 @@ typedef struct _prefs {
     int main_window_width;
     int main_window_height;
     int eject_on_done;
+    int always_overwrite;
     int do_cddb_updates;
     int use_proxy;
     int port_number;
@@ -2520,7 +2521,12 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(
 											_("Eject disc when finished"));
 	gtk_widget_show(eject_on_done);
-	BOXPACK(vbox, eject_on_done, FALSE, FALSE, 5);
+	BOXPACK(vbox, eject_on_done, FALSE, FALSE, 4);
+
+	GtkWidget *always_overwrite = gtk_check_button_new_with_mnemonic(
+										_("Always overwrite output files"));
+	gtk_widget_show(always_overwrite);
+	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 4);
 
 	label = gtk_label_new(_("General"));
 	gtk_widget_show(label);
@@ -2876,6 +2882,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, cdrom, "cdrom");
 	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
 	HOOKUP(prefs, eject_on_done, "eject_on_done");
+	HOOKUP(prefs, always_overwrite, "always_overwrite");
 	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
 	HOOKUP(prefs, fmt_playlist, WDG_FMT_PLAYLIST);
@@ -3020,7 +3027,12 @@ static prefs *get_default_prefs()
 	p->do_log = 0;
 	p->max_log_size = 5000; // kb
 	szcopy(p->log_file, DEFAULT_LOG_FILE);
+	const gchar *user = g_getenv("USER");
+	if(user!=NULL && *user!='\0') {
+		snprintf(p->log_file, SZENTRY, "/tmp/%s.%s.log", PACKAGE, user);
+	}
 	p->eject_on_done = 0;
+	p->always_overwrite = 0;
 	p->main_window_height = 380;
 	p->main_window_width = 520;
 	p->make_playlist = 1;
@@ -3088,6 +3100,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle("do_cddb_updates", p->do_cddb_updates);
 	set_pref_toggle("do_log", p->do_log);
 	set_pref_toggle("eject_on_done", p->eject_on_done);
+	set_pref_toggle("always_overwrite", p->always_overwrite);
 	set_pref_toggle("make_playlist", p->make_playlist);
 	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
 	set_pref_toggle("rip_mp3", p->rip_mp3);
@@ -3183,6 +3196,7 @@ static void get_prefs_from_widgets(prefs *p)
 	p->rip_mp3 = get_pref_toggle("rip_mp3");
 	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
+	p->always_overwrite = get_pref_toggle("always_overwrite");
 	p->do_cddb_updates = get_pref_toggle("do_cddb_updates");
 	p->use_proxy = get_pref_toggle("use_proxy");
 	p->cddb_nocache = get_pref_toggle("cddb_nocache");
@@ -3244,6 +3258,7 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "WINDOW_WIDTH=%d\n", p->main_window_width);
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
 	fprintf(fd, "EJECT=%d\n", p->eject_on_done);
+	fprintf(fd, "OVERWRITE=%d\n", p->always_overwrite);
 	fprintf(fd, "CDDB_UPDATE=%d\n", p->do_cddb_updates);
 	fprintf(fd, "USE_PROXY=%d\n", p->use_proxy);
 	fprintf(fd, "SERVER_NAME=%s\n", p->server_name);
@@ -3320,6 +3335,7 @@ static void load_prefs()
 	get_field_as_long(s,file,"MAX_LOG_SIZE", &(p->max_log_size));
 	get_field_as_szentry(s, file, "LOG_FILE", p->log_file);
 	get_field_as_long(s,file,"EJECT", &(p->eject_on_done));
+	get_field_as_long(s,file,"OVERWRITE", &(p->always_overwrite));
 	get_field_as_long(s,file,"CDDB_UPDATE", &(p->do_cddb_updates));
 	get_field_as_long(s,file,"USE_PROXY",&(p->use_proxy));
 	get_field_as_long(s,file,"CDDB_NOCACHE",&(p->cddb_nocache));
@@ -3426,6 +3442,7 @@ static bool string_has_slashes(const char *string)
 
 static bool confirmOverwrite(const char *pathAndName)
 {
+	if (g_prefs->always_overwrite) return true;
 	if (g_data->overwriteAll) return true;
 	if (g_data->overwriteNone) return false;
 

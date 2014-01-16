@@ -17,9 +17,7 @@ Normal priority:
 * Replace maintainer-build.sh with autogen.sh
 * Add support for OGG Vorbis
 * Add support for libmusicbrainz
-* Add AM_SILENT_RULES([yes])
 * Add option named Cdparanoia fast mode (-Z)
-* Add option to "Always overwrite files"
 
 Lower priority:
 ---------------
@@ -29,4 +27,10 @@ Lower priority:
   - IronGrip does not compile on Slackware 10.2 because GTK+ is too old (2.6.10).
   - irongrip seems to require at least GTK+ v2.8
   - gtk_entry_completion_set_popup_set_width () requires GTK+ 2.8
+
+Done in next branch
+-------------------
+* Add option to "Always overwrite files"
+* Add AM_SILENT_RULES([yes])
+* log filename is /tmp/irongrip.$USER.log
 

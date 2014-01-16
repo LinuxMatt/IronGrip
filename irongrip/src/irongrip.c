@@ -246,6 +246,7 @@ typedef struct _prefs {
     int main_window_height;
     int eject_on_done;
     int always_overwrite;
+    int rip_fast;
     int do_cddb_updates;
     int use_proxy;
     int port_number;
@@ -2528,6 +2529,11 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(always_overwrite);
 	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 4);
 
+	GtkWidget *rip_fast = gtk_check_button_new_with_mnemonic(
+										_("Cdparanoia fast mode"));
+	gtk_widget_show(rip_fast);
+	BOXPACK(vbox, rip_fast, FALSE, FALSE, 4);
+
 	label = gtk_label_new(_("General"));
 	gtk_widget_show(label);
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 0), label);
@@ -2883,6 +2889,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
 	HOOKUP(prefs, eject_on_done, "eject_on_done");
 	HOOKUP(prefs, always_overwrite, "always_overwrite");
+	HOOKUP(prefs, rip_fast, "rip_fast");
 	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
 	HOOKUP(prefs, fmt_playlist, WDG_FMT_PLAYLIST);
@@ -3033,6 +3040,7 @@ static prefs *get_default_prefs()
 	}
 	p->eject_on_done = 0;
 	p->always_overwrite = 0;
+	p->rip_fast = 0;
 	p->main_window_height = 380;
 	p->main_window_width = 520;
 	p->make_playlist = 1;
@@ -3101,6 +3109,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle("do_log", p->do_log);
 	set_pref_toggle("eject_on_done", p->eject_on_done);
 	set_pref_toggle("always_overwrite", p->always_overwrite);
+	set_pref_toggle("rip_fast", p->rip_fast);
 	set_pref_toggle("make_playlist", p->make_playlist);
 	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
 	set_pref_toggle("rip_mp3", p->rip_mp3);
@@ -3197,6 +3206,7 @@ static void get_prefs_from_widgets(prefs *p)
 	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
 	p->always_overwrite = get_pref_toggle("always_overwrite");
+	p->rip_fast = get_pref_toggle("rip_fast");
 	p->do_cddb_updates = get_pref_toggle("do_cddb_updates");
 	p->use_proxy = get_pref_toggle("use_proxy");
 	p->cddb_nocache = get_pref_toggle("cddb_nocache");
@@ -3259,6 +3269,7 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
 	fprintf(fd, "EJECT=%d\n", p->eject_on_done);
 	fprintf(fd, "OVERWRITE=%d\n", p->always_overwrite);
+	fprintf(fd, "CDPARANOIA_ZMODE=%d\n", p->rip_fast);
 	fprintf(fd, "CDDB_UPDATE=%d\n", p->do_cddb_updates);
 	fprintf(fd, "USE_PROXY=%d\n", p->use_proxy);
 	fprintf(fd, "SERVER_NAME=%s\n", p->server_name);
@@ -3336,6 +3347,7 @@ static void load_prefs()
 	get_field_as_szentry(s, file, "LOG_FILE", p->log_file);
 	get_field_as_long(s,file,"EJECT", &(p->eject_on_done));
 	get_field_as_long(s,file,"OVERWRITE", &(p->always_overwrite));
+	get_field_as_long(s,file,"CDPARANOIA_ZMODE", &(p->rip_fast));
 	get_field_as_long(s,file,"CDDB_UPDATE", &(p->do_cddb_updates));
 	get_field_as_long(s,file,"USE_PROXY",&(p->use_proxy));
 	get_field_as_long(s,file,"CDDB_NOCACHE",&(p->cddb_nocache));

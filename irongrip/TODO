@@ -32,4 +32,4 @@ Done in next branch
 * Add AM_SILENT_RULES([yes])
 * log filename is /tmp/irongrip.$USER.log
 * Add option named Cdparanoia fast mode (-Z)
-* fix flac output analysis, percentage scanning is not always accurate
+* fixed flac output analysis for percentage

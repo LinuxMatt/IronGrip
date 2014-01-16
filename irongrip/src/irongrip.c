@@ -3567,8 +3567,16 @@ void make_playlist(const char *filename, FILE ** file)
 static void cdparanoia(char *cdrom, int tracknum, char *filename)
 {
 	gchar *trk = g_strdup_printf("%d", tracknum);
-	const char *args[] = { CDPARANOIA_PRG, "-e", "-d", cdrom, trk,
-							filename, NULL };
+	int pos = 0;
+	const char *args[32];
+	args[pos++] = CDPARANOIA_PRG;
+	if(g_prefs->rip_fast) args[pos++] = "-Z";
+	args[pos++] = "-e";
+	args[pos++] = "-d";
+	args[pos++] = cdrom;
+	args[pos++] = trk;
+	args[pos++] = filename;
+	args[pos++] = NULL;
 
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->cdparanoia_pid);
 	fd_set readfds;

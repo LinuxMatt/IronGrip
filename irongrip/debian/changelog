@@ -1,5 +1,7 @@
 irongrip (0.7-1) unstable; urgency=low
 
+  * Fix lots of GUI freezing bugs
+  * Add new options
   * Add support for XDG_CACHE_DIR.
   * Add translations from Asunder 2.4.
 

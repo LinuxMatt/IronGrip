@@ -15,6 +15,7 @@ Normal priority:
 * Replace maintainer-build.sh with autogen.sh
 * Add support for OGG Vorbis
 * Add support for libmusicbrainz
+* Add 'play track' buttons next to each track number
 
 Lower priority:
 ---------------
@@ -26,10 +27,6 @@ Lower priority:
   - irongrip seems to require at least GTK+ v2.8
   - gtk_entry_completion_set_popup_set_width () requires GTK+ 2.8
 
-Done in next branch
--------------------
-* Add option to "Always overwrite files"
-* Add AM_SILENT_RULES([yes])
-* log filename is /tmp/irongrip.$USER.log
-* Add option named Cdparanoia fast mode (-Z)
-* fixed flac output analysis for percentage
+Done in next branch for v0.8
+----------------------------
+* Nothing yet

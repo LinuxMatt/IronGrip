@@ -1,6 +1,6 @@
 IronGrip
 ========
-Graphical frontend for Audio CD ripping and encoding
+Graphical frontend for Audio CD ripping and encoding.
 
 Features
 --------
@@ -16,10 +16,11 @@ You can download debian packages at http://sourceforge.net/projects/irongrip/.
 - They are compatible with Linux Mint 9 and above.
 - They should also work on Debian 6 and above.
 
-Help, bugs, suggestions and feedback
-------------------------------------
-- Send an e-mail to <matt59491@gmail.com>
-- Open an issue at https://github.com/LinuxMatt/IronGrip/issues
+News, help, bugs, suggestions and feedback
+------------------------------------------
+- For news about releases, go to our project page at http://freecode.com/projects/irongrip
+- For bugs and requests, open an issue at https://github.com/LinuxMatt/IronGrip/issues
+- To contact me, send an e-mail to <matt59491@gmail.com>
 
 This project is still young, it *needs your feedback* ;)
 

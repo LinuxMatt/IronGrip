@@ -19,6 +19,7 @@ Normal priority:
 
 Lower priority:
 ---------------
+* Fix progress bar not always going to 100% when job is finished.
 * Enable logging on console (stderr)
 * use --best for flac compression (-8 is still equivalent)
 * Fix log output format

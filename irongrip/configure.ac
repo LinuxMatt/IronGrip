@@ -16,7 +16,7 @@ AM_PROG_CC_STDC
 AC_PROG_INSTALL
 AC_HEADER_STDC
 AC_HEADER_STDBOOL
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h libintl.h limits.h netdb.h netinet/in.h pthread.h stdlib.h string.h sys/ioctl.h sys/socket.h sys/time.h sys/timeb.h unistd.h])
+AC_CHECK_HEADERS([arpa/inet.h dlfcn.h fcntl.h libintl.h limits.h netdb.h netinet/in.h pthread.h stdlib.h string.h sys/ioctl.h sys/socket.h sys/time.h sys/timeb.h unistd.h])
 AC_C_INLINE
 AC_TYPE_MODE_T
 AC_TYPE_PID_T
@@ -25,6 +25,7 @@ AC_FUNC_FORK
 AC_FUNC_MALLOC
 AC_FUNC_REALLOC
 AC_CHECK_FUNCS([alarm bzero dup2 ftime gethostbyname memset mkdir regcomp select socket strchr strdup strerror strrchr strtol])
+AC_SEARCH_LIBS([dlopen], [dl dld], [], [ AC_MSG_ERROR([unable to find the dlopen() function]) ])
 
 pkg_modules="gtk+-2.0 >= 2.8.0, gthread-2.0 >= 2.4.0, glib-2.0 >= 2.10.0"
 PKG_CHECK_MODULES(PACKAGE, [$pkg_modules])

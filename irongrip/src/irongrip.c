@@ -1080,6 +1080,54 @@ static GdkPixbuf *LoadMainIcon()
 	return icon;
 }
 
+#define FMAP(tdef,fname,fptr) \
+	tdef fptr = (tdef)dlsym(hnd,fname);\
+	if(hnd == NULL) {\
+		printf("Library function not found: %s\n",fname);\
+		goto cleanup;\
+	}
+
+static int notify(char *message)
+{
+	static void *hnd = NULL;
+	typedef void  (*ntf_init_t)(char*);
+	typedef void *(*ntf_new_t)(char*,char*,char*,char*);
+	typedef void  (*ntf_set_timeout_t)(void*,int);
+	typedef void  (*ntf_show_t)(void*,char*);
+	typedef void  (*ntf_icon_t)(void*,void*);
+	int ret = 0;
+
+	if(!hnd) {
+		hnd= dlopen("libnotify.so.1", RTLD_LAZY);
+		if (hnd == NULL) {
+			hnd= dlopen("libnotify.so.4", RTLD_LAZY);
+			if (hnd == NULL) {
+				printf("Failed to open library version 1 and 4\n");
+				return ret;
+			}
+		}
+	}
+	FMAP(ntf_init_t,"notify_init",nn_init);
+	FMAP(ntf_new_t,"notify_notification_new",nn_new);
+	FMAP(ntf_set_timeout_t,"notify_notification_set_timeout",nn_st);
+	FMAP(ntf_show_t,"notify_notification_show",nn_show);
+	FMAP(ntf_icon_t,"notify_notification_set_image_from_pixbuf",nn_icon);
+
+	nn_init(PROGRAM_NAME);
+	void *n = nn_new(PROGRAM_NAME, message, NULL, NULL);
+	nn_st(n, 6000);
+	GdkPixbuf *icon = LoadMainIcon();
+	if (icon) {
+		nn_icon(n, icon);
+		g_object_unref(icon);
+	}
+	nn_show(n, NULL);
+	ret = 1;
+cleanup:
+	// dlclose(hnd); // Would blow up application
+	return ret;
+}
+
 static GList *get_drives_to_open()
 {
 	GList *r = NULL;
@@ -1594,6 +1642,7 @@ static gboolean idle(gpointer data)
 
 static gboolean scan_on_startup(gpointer data)
 {
+	notify("Welcome to " PROGRAM_NAME " !");
     TRACEINFO("scan_on_startup");
     refresh(0);
     return (data != NULL);

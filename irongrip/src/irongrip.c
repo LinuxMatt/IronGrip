@@ -1383,6 +1383,38 @@ static void lookup_disc(cddb_disc_t *disc)
 	cddb_destroy(g_data->cddb_conn);
 }
 
+static int read_toc_entry(int fd, int track_num, unsigned long *lba) {
+	struct cdrom_tocentry te;
+	int ret;
+
+	te.cdte_track = track_num;
+	te.cdte_format = CDROM_LBA;
+
+	ret = ioctl(fd, CDROMREADTOCENTRY, &te);
+	g_assert( te.cdte_format == CDROM_LBA );
+
+	/* in case the ioctl() was successful */
+	if ( ret == 0 )
+		*lba = te.cdte_addr.lba;
+
+	return ret;
+}
+
+#define XA_INTERVAL		((60 + 90 + 2) * CD_FRAMES)
+static int read_leadout(int fd, unsigned long *lba) {
+	struct cdrom_multisession ms;
+	int ret;
+
+	ms.addr_format = CDROM_LBA;
+	ret = ioctl(fd, CDROMMULTISESSION, &ms);
+
+	if ( ms.xa_flag ) {
+		*lba = ms.addr.lba - XA_INTERVAL;
+		return ret;
+	}
+	return read_toc_entry(fd, CDROM_LEADOUT, lba);
+}
+
 static cddb_disc_t *read_disc(char *cdrom)
 {
 	int fd = open(cdrom, O_RDONLY | O_NONBLOCK);
@@ -1435,6 +1467,57 @@ static cddb_disc_t *read_disc(char *cdrom)
 		cddb_disc_set_length(disc, (te.cdte_addr.lba + SECONDS_TO_FRAMES(2))
 				/ SECONDS_TO_FRAMES(1));
 	}
+
+	GChecksum *ck = g_checksum_new(G_CHECKSUM_SHA1);
+
+	int first = th.cdth_trk0;
+	int last = th.cdth_trk1;
+	guchar		tmp[17]; /* for 8 hex digits (16 to avoid trouble) */
+	sprintf((char*)tmp, "%02X", first);
+	g_checksum_update(ck, tmp, strlen((char *)tmp));
+	sprintf((char*)tmp, "%02X", last);
+	g_checksum_update(ck, tmp, strlen((char *)tmp));
+
+	int track_offsets[100];
+	memset(&track_offsets,0,sizeof(track_offsets));
+	unsigned long lba;
+	read_leadout(fd, &lba);
+	track_offsets[0] = lba + 150;
+	int i;
+	for (i = first; i <= last; i++) {
+		read_toc_entry(fd, i, &lba);
+		track_offsets[i] = lba + 150;
+	}
+	for (i = 0; i < 100; i++) {
+		sprintf((char *)tmp, "%08X", track_offsets[i]);
+		g_checksum_update(ck, tmp, strlen((char *)tmp));
+	}
+	guint8 buffer[48];
+	gsize digest_len = 48;
+	g_checksum_get_digest(ck, buffer, &digest_len);
+	printf("SHA = [");
+	for(i=0;i<digest_len;i++) {
+		printf("%02X", buffer[i]);
+	}
+	printf("] ");
+	gchar *b64 =g_base64_encode(buffer, digest_len);
+	printf("BASE64 = %s\n", b64);
+	gchar *p = b64;
+	while(*p) {
+		if(*p == '+') *p = '.';
+		if(*p == '/') *p = '_';
+		if(*p == '=') *p = '-';
+		p++;
+	}
+	printf("DiscID = %s\n", b64);
+	g_free(b64);
+
+	/*
+	 # convert special http/url characters to musicbrainz replacements
+	 $discid =~ s/\+/./g;
+	 $discid =~ s/\//_/g;
+	 $discid =~ s/=/-/g;
+	 */
 end:
 	close(fd);
 	return disc;

@@ -22,12 +22,14 @@
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
 #include <ctype.h>
+#include <dlfcn.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/ioctl.h>
@@ -37,7 +39,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <assert.h>
-#include <curl/curl.h>
 
 #ifdef NDEBUG
   #define dprintf(s)  printf("%s:%d: %s: %s\n",__FILE__,__LINE__,__func__,s)
@@ -339,7 +340,6 @@ const char *XmlGetAttribute(struct xmlnode *n, const char *attr)
 		/* Skip the match */
 		s++;
 	}
-
 	return NULL;
 }
 
@@ -422,7 +422,6 @@ const char *XmlParseStr(struct xmlnode **n, const char *s)
 	if (s == NULL) {
 		return NULL;
 	}
-
 	*n = x_zalloc(sizeof(struct xmlnode));
 	(*n)->fd = -1;
 	(*n)->array = s;
@@ -478,14 +477,69 @@ static size_t curlCallback(void *ptr, size_t size, size_t nmemb, void *param)
     return realsize;
 }
 
+#define FMAP(tdef,fname,fptr) \
+	tdef fptr = (tdef)dlsym(h,fname);\
+	if(h == NULL) {\
+		printf("Library function not found: %s\n",fname);\
+		goto cleanup;\
+	}
+
+static void* get_curl_lib()
+{
+	char *libs[] = { "libcurl.so.4", "libcurl.so", "libcurl-gnutls.so.4",
+						"libcurl.so.3", NULL };
+	static void *h = NULL;
+
+	if(h) return h;
+	char **p = libs;
+	while(*p) {
+		h = dlopen(*p, RTLD_LAZY);
+		if(h) {
+			printf("Loaded %s\n", *p);
+			return h;
+		}
+		p++;
+	}
+	printf("Failed to open Curl library.\n");
+	return NULL;
+}
+
 /** Fetch some URL and return the contents in a memory buffer.
  * \param[in,out] size    Pointer to fill with the length of returned data.
  * \param[in]     urlFmt  The URL, or a printf-style format string for the URL.
  * \returns A pointer to the read data, or NULL if the fetch failed in any way.
- */
+*/
 static void *CurlFetch(size_t *size, const char *urlFmt, ...)
 {
+	void *h = get_curl_lib();
+	if(!h) return NULL;
+
+	typedef void*		(*ce_init_t)(void);
+	typedef int			(*ce_setopt_t)(void *, int, ...);
+	typedef int			(*ce_perform_t)(void *);
+	typedef const char* (*ce_strerror_t)(int);
+	typedef void		(*ce_cleanup_t)(void *);
+
+	FMAP(ce_init_t,"curl_easy_init",ce_init);
+	FMAP(ce_setopt_t,"curl_easy_setopt",ce_setopt);
+	FMAP(ce_perform_t,"curl_easy_perform",ce_perform);
+	FMAP(ce_strerror_t,"curl_easy_strerror",ce_strerror);
+	FMAP(ce_cleanup_t,"curl_easy_cleanup",ce_cleanup);
+
+	void *ch = ce_init();
+	if (ch == NULL) {
+		fprintf(stderr,"Error: Failed to initialise libcurl\n");
+		exit(EXIT_FAILURE);
+	}
+	/* Try to get the data */
+	const int CO_URL = 10002;
+	const int CO_WRITEFUNCTION = 20011;
+	const int CO_WRITEDATA = 10001;
+	const int CO_USERAGENT = 10018;
+	const int CO_FAILONERROR = 45;
+	const int CO_VERBOSE = 41;
 	struct cfetch cfdata;
+
 	memset(&cfdata, 0, sizeof(cfdata));
 
 	/* Formulate the URL */
@@ -495,32 +549,37 @@ static void *CurlFetch(size_t *size, const char *urlFmt, ...)
 	vsnprintf(buf, sizeof(buf), urlFmt, ap);
 	va_end(ap);
 
-	CURL *ch = curl_easy_init();
-	if (ch == NULL) {
-		fprintf(stderr,"Error: Failed to initialise libcurl\n");
-		exit(EXIT_FAILURE);
-	}
-	/* Try to get the data */
-	curl_easy_setopt(ch, CURLOPT_URL, buf);
-	curl_easy_setopt(ch, CURLOPT_WRITEFUNCTION, curlCallback);
-	curl_easy_setopt(ch, CURLOPT_WRITEDATA, (void *) &cfdata);
-	curl_easy_setopt(ch, CURLOPT_USERAGENT, "irongrip/0.8");
-	curl_easy_setopt(ch, CURLOPT_FAILONERROR, 1);
+	ce_setopt(ch, CO_URL, buf);
+	ce_setopt(ch, CO_WRITEFUNCTION, curlCallback);
+	ce_setopt(ch, CO_WRITEDATA, (void *) &cfdata);
+	ce_setopt(ch, CO_USERAGENT, "irongrip/0.8");
+	ce_setopt(ch, CO_FAILONERROR, 1);
+	ce_setopt(ch, CO_VERBOSE, 1);
+	/*
+	// Set proxy information if necessary.
+    (*curl_easy_setopt)(curl, CURLOPT_PROXY, proxy);
+    (*curl_easy_setopt)(curl, CURLOPT_PROXYUSERPWD, proxy_user_pwd);
+	*/
 
 	void *res;
-	if (curl_easy_perform(ch) == 0) {
+	int err_code = ce_perform(ch);
+	if (err_code == 0) {
 		res = cfdata.data;
 		if (size != NULL) {
 			*size = cfdata.size;
 		}
 	} else {
+		printf("CURL err %d = %s\n", err_code, ce_strerror(err_code));
 		res = NULL;
 		if (size != NULL) {
 			*size = 0;
 		}
 		free(cfdata.data);
 	}
-	curl_easy_cleanup(ch);
+	ce_cleanup(ch);
+
+cleanup:
+	// dlclose(h); // Would blow up application
 	return res;
 }
 
@@ -741,16 +800,13 @@ static void processArtistCredit(struct xmlnode *artistCreditNode, mbartistcredit
 					strcat(cd->artistName, ", ");
 					strcat(cd->artistName, aa);
 				}
-
 				XmlDestroy(&o);
 			}
-
 			o = XmlFindSubNode(artistNode, "sort-name");
 			if (o) {
 				cd->artistNameSort = x_strdup(XmlGetContent(o));
 				XmlDestroy(&o);
 			}
-
 			XmlDestroy(&artistNode);
 		}
 	}
@@ -780,23 +836,19 @@ static void processTrackNode(struct xmlnode *trackNode, mbmedium_t * md)
 				if (id) {
 					td->trackId = x_strdup(id);
 				}
-
 				m = XmlFindSubNode(recording, "title");
 				if (m) {
 					td->trackName = x_strdup(XmlGetContent(m));
 					XmlDestroy(&m);
 				}
-
 				m = XmlFindSubNode(recording, "artist-credit");
 				if (m) {
 					processArtistCredit(m, &td->trackArtist);
 					XmlDestroy(&m);
 				}
-
 				XmlDestroy(&recording);
 			}
 		}
-
 		XmlDestroy(&n);
 	}
 }
@@ -827,7 +879,6 @@ static bool processMediumNode(struct xmlnode *mediumNode, const char *discId, mb
 				}
 			}
 		}
-
 		XmlDestroy(&disc);
 		XmlDestroy(&n);
 	}
@@ -841,13 +892,11 @@ static bool processMediumNode(struct xmlnode *mediumNode, const char *discId, mb
 			md->discNum = atoi(XmlGetContent(n));
 			XmlDestroy(&n);
 		}
-
 		n = XmlFindSubNode(mediumNode, "title");
 		if (n) {
 			md->title = x_strdup(XmlGetContent(n));
 			XmlDestroy(&n);
 		}
-
 		n = XmlFindSubNode(mediumNode, "track-list");
 		if (n) {
 			const char *count = XmlGetAttribute(n, "count");
@@ -865,16 +914,12 @@ static bool processMediumNode(struct xmlnode *mediumNode, const char *discId, mb
 						processTrackNode(track, md);
 					}
 				}
-
 				mediumValid = true;
-
 				XmlDestroy(&track);
 			}
-
 			XmlDestroy(&n);
 		}
 	}
-
 	return mediumValid;
 }
 
@@ -882,7 +927,6 @@ static uint16_t processReleaseNode(struct xmlnode *releaseNode, const char *disc
 								   mbrelease_t * cd, mbmedium_t ** md)
 {
 	struct xmlnode *n;
-
 	assert(strcmp(XmlGetTag(releaseNode), "release") == 0);
 
 	memset(cd, 0, sizeof(mbrelease_t));
@@ -894,26 +938,22 @@ static uint16_t processReleaseNode(struct xmlnode *releaseNode, const char *disc
 		cd->asin = x_strdup(XmlGetContent(n));
 		XmlDestroy(&n);
 	}
-
 	n = XmlFindSubNode(releaseNode, "title");
 	if (n) {
 		cd->albumTitle = x_strdup(XmlGetContent(n));
 		XmlDestroy(&n);
 	}
-
 	n = XmlFindSubNode(releaseNode, "release-group");
 	if (n) {
 		cd->releaseType = x_strdup(XmlGetAttribute(n, "type"));
 		cd->releaseGroupId = x_strdup(XmlGetAttribute(n, "id"));
 		XmlDestroy(&n);
 	}
-
 	n = XmlFindSubNode(releaseNode, "artist-credit");
 	if (n) {
 		processArtistCredit(n, &cd->albumArtist);
 		XmlDestroy(&n);
 	}
-
 	n = XmlFindSubNode(releaseNode, "medium-list");
 	if (n) {
 		const char *s, *count = XmlGetAttribute(n, "count");
@@ -924,7 +964,6 @@ static uint16_t processReleaseNode(struct xmlnode *releaseNode, const char *disc
 		if (count) {
 			cd->discTotal = atoi(count);
 		}
-
 		s = XmlGetContent(n);
 
 		while ((s = XmlParseStr(&m, s)) != NULL) {
@@ -935,12 +974,9 @@ static uint16_t processReleaseNode(struct xmlnode *releaseNode, const char *disc
 				}
 			}
 		}
-
 		XmlDestroy(&n);
 		XmlDestroy(&m);
-
 		mediumCount = dedupeMediums(mediumCount, mediums);
-
 		*md = mediums;
 		return mediumCount;
 	} else {
@@ -956,14 +992,12 @@ static bool processRelease(const char *releaseId, const char *discId, mbresult_t
 	void *buf;
 	const char *s;
 
-	s = buf =
-		CurlFetch(NULL,
-				  "http://musicbrainz.org/ws/2/release/%s?inc=recordings+artists+release-groups+discids+artist-credits",
-				  releaseId);
+	s = buf = CurlFetch(NULL,
+		  "http://musicbrainz.org/ws/2/release/%s?inc=recordings+artists+release-groups+discids+artist-credits",
+			  releaseId);
 	if (buf == NULL) {
 		return false;
 	}
-
 	/* Find the metadata node */
 	do {
 		s = XmlParseStr(&metaNode, s);
@@ -975,32 +1009,24 @@ static bool processRelease(const char *releaseId, const char *discId, mbresult_t
 	if (metaNode == NULL) {
 		return false;
 	}
-
 	releaseNode = XmlFindSubNodeFree(metaNode, "release");
 	if (releaseNode) {
 		mbmedium_t *medium = NULL;
 		uint16_t mediumCount;
 		mbrelease_t release;
-
 		mediumCount = processReleaseNode(releaseNode, discId, &release, &medium);
 
 		for (uint16_t m = 0; m < mediumCount; m++) {
 			mbrelease_t *newRel;
-
 			res->releaseCount++;
 			res->release = x_realloc(res->release, sizeof(mbrelease_t) * res->releaseCount);
-
 			newRel = &res->release[res->releaseCount - 1];
-
 			memcpy(newRel, &release, sizeof(mbrelease_t));
 			memcpy(&newRel->medium, &medium[m], sizeof(mbmedium_t));
 		}
-
 		XmlDestroy(&releaseNode);
-
 		return true;
 	}
-
 	return false;
 }
 
@@ -1022,7 +1048,6 @@ bool MbLookup(const char *discId, mbresult_t * res)
 	if (!buf) {
 		return false;
 	}
-
 	/* Find the metadata node */
 	do {
 		s = XmlParseStr(&metaNode, s);
@@ -1034,7 +1059,6 @@ bool MbLookup(const char *discId, mbresult_t * res)
 	if (metaNode == NULL) {
 		return false;
 	}
-
 	releaseListNode = XmlFindSubNodeFree(XmlFindSubNodeFree(metaNode, "disc"), "release-list");
 	if (releaseListNode) {
 		struct xmlnode *releaseNode = NULL;
@@ -1047,17 +1071,12 @@ bool MbLookup(const char *discId, mbresult_t * res)
 				processRelease(releaseId, discId, res);
 			}
 		}
-
 		XmlDestroy(&releaseNode);
-
 		dedupeReleases(res);
 	}
-
 	XmlDestroy(&releaseListNode);
-
 	return true;
 }
-
 
 void MbFree(mbresult_t * res)
 {

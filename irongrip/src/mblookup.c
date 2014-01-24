@@ -495,7 +495,7 @@ static void* get_curl_lib()
 	while(*p) {
 		h = dlopen(*p, RTLD_LAZY);
 		if(h) {
-			printf("Loaded %s\n", *p);
+			// printf("Loaded %s\n", *p);
 			return h;
 		}
 		p++;
@@ -537,7 +537,7 @@ static void *CurlFetch(size_t *size, const char *urlFmt, ...)
 	const int CO_WRITEDATA = 10001;
 	const int CO_USERAGENT = 10018;
 	const int CO_FAILONERROR = 45;
-	const int CO_VERBOSE = 41;
+	//const int CO_VERBOSE = 41;
 	struct cfetch cfdata;
 
 	memset(&cfdata, 0, sizeof(cfdata));
@@ -554,8 +554,8 @@ static void *CurlFetch(size_t *size, const char *urlFmt, ...)
 	ce_setopt(ch, CO_WRITEDATA, (void *) &cfdata);
 	ce_setopt(ch, CO_USERAGENT, "irongrip/0.8");
 	ce_setopt(ch, CO_FAILONERROR, 1);
-	ce_setopt(ch, CO_VERBOSE, 1);
 	/*
+	ce_setopt(ch, CO_VERBOSE, 1);
 	// Set proxy information if necessary.
     (*curl_easy_setopt)(curl, CURLOPT_PROXY, proxy);
     (*curl_easy_setopt)(curl, CURLOPT_PROXYUSERPWD, proxy_user_pwd);
@@ -1126,12 +1126,47 @@ void MbPrint(const mbresult_t * res)
 	}
 }
 
+#define M_ArraySize(a)  (sizeof(a) / sizeof(a[0]))
+
+static void fetch_image(const mbresult_t *res) {
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		mbrelease_t *rel = &res->release[r];
+		printf("http://musicbrainz.org/ws/2/release/%s\n", rel->releaseId);
+		if(!rel->asin) continue;
+		//printf("ASIN=%s\n", rel->asin);
+		const char *artUrl[] = {
+			"http://images.amazon.com/images/P/%s.02._SCLZZZZZZZ_.jpg", /* UK */
+			"http://images.amazon.com/images/P/%s.01._SCLZZZZZZZ_.jpg", /* US */
+			"http://images.amazon.com/images/P/%s.03._SCLZZZZZZZ_.jpg", /* DE */
+			"http://images.amazon.com/images/P/%s.08._SCLZZZZZZZ_.jpg", /* FR */
+			"http://images.amazon.com/images/P/%s.09._SCLZZZZZZZ_.jpg"  /* JP */
+		};
+		uint8_t attempt = 0;
+		do {
+			size_t sz = 0;
+			const char *s = CurlFetch(&sz, artUrl[attempt], rel->asin);
+			if(!s) continue;
+			printf(artUrl[attempt], rel->asin);
+			printf("\n");
+			char f[1024];
+			sprintf(f,"%s.jpg",rel->asin);
+			FILE *fd = fopen(f, "wb");
+			if(fd) {
+				fwrite(s,1,sz,fd);
+				fclose(fd);
+				break;
+			}
+		} while(++attempt < M_ArraySize(artUrl));
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	mbresult_t res;
 	if (argc > 1) {
 		MbLookup(argv[1], &res);
-		MbPrint(&res);
+		fetch_image(&res);
+		//MbPrint(&res);
 		MbFree(&res);
 	}
 	return 0;

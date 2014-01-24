@@ -28,53 +28,65 @@ typedef struct _data {
 	unsigned short i;
 	unsigned short size;
 	unsigned short max;
-	unsigned short filler;
+	unsigned short uniq;
 } s_data;
-static void init(s_data *g) {
+static void init(s_data *g,int unsigned short uniq) {
 	g->size = 4*1024;
 	g->max = 40;
+	g->uniq = uniq;
 	g->p = g->buf = calloc(1,g->size);
 	g->list = calloc(g->max,sizeof(char*));
 }
 static int cmp(const void *p1, const void *p2) {
 	return strcmp(* (char * const *) p1, * (char * const *) p2);
 }
-static void add(char *s, s_data *g) {
-	int l = strlen(s);
-	if(g->p - g->buf + l >= g->size - 1) {
-		printf("size overflow\n");
-		return;
+static void sort(s_data *g) {
+	qsort(g->list,g->i,sizeof(char *),cmp);
+}
+static void dump(s_data *g, char *msg) {
+	for(int j=0; j<g->i; j++) {
+		printf("%3d %s: [%s]\n", j+1, msg, g->list[j]);
 	}
-	if(g->i>=g->max) {
-		printf("list overflow\n");
-		return;
-	}
-	memcpy(g->p, s, l);
-	g->list[g->i]=g->p;
-	g->p+=l+1;
-	g->i++;
+}
+static void add(s_data *g, char *s) {
+    int l = strlen(s);
+    if(g->p - g->buf + l >= g->size - 1) {
+        printf("size overflow\n");
+        return;
+    }
+    if(g->i>=g->max) {
+        printf("list overflow\n");
+        return;
+    }
+    if(g->uniq) {
+        for(int i = 0; i < g->i; i++) {
+            if(strcmp(g->list[i], s)==0) {
+                return;
+            }
+        }
+    }
+    memcpy(g->p, s, l);
+    g->list[g->i]=g->p;
+    g->p+=l+1;
+    g->i++;
 }
 int main() {
 	s_data *g = calloc(1,sizeof(s_data));
 	printf("SIZE OF s_data = %lu\n", sizeof(s_data));
-	init(g);
+	init(g,1);
 
-	add("YANNICK",g);
-	add("HELLO",g);
-	add("ROBERT",g);
-	add("TAN",g);
-	add("ZORRO",g);
-	add("YANNICK",g);
-	add("ELEPHANT",g);
+	add(g,"YANNICK");
+	add(g,"ZORRO");
+	add(g,"HELLO");
+	add(g,"ROBERT");
+	add(g,"TAN");
+	add(g,"ZORRO");
+	add(g,"YANNICK");
+	add(g,"ZORRO");
+	add(g,"ELEPHANT");
 
-	for(int j=0; j<g->i; j++) {
-		printf("UNSORT: [%s]\n", g->list[j]);
-	}
-	qsort(g->list,g->i,sizeof(char *),cmp);
-
-	for(int j=0; j<g->i; j++) {
-		printf("SORT: [%s]\n", g->list[j]);
-	}
+    sort(g);
+    dump(g, "sorted");
 	return 1;
 }
 

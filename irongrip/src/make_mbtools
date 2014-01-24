@@ -1,0 +1,3 @@
+gcc -Wall -std=c99 -o mblookup mblookup.c -ldl
+gcc -Wall -std=c99 -o mburlscan mburlscan.c
+

@@ -1081,15 +1081,15 @@ static GdkPixbuf *LoadMainIcon()
 }
 
 #define FMAP(tdef,fname,fptr) \
-	tdef fptr = (tdef)dlsym(hnd,fname);\
-	if(hnd == NULL) {\
+	tdef fptr = (tdef)dlsym(h,fname);\
+	if(h == NULL) {\
 		printf("Library function not found: %s\n",fname);\
 		goto cleanup;\
 	}
 
 static int notify(char *message)
 {
-	static void *hnd = NULL;
+	static void *h = NULL;
 	typedef void  (*ntf_init_t)(char*);
 	typedef void *(*ntf_new_t)(char*,char*,char*,char*);
 	typedef void  (*ntf_set_timeout_t)(void*,int);
@@ -1097,11 +1097,11 @@ static int notify(char *message)
 	typedef void  (*ntf_icon_t)(void*,void*);
 	int ret = 0;
 
-	if(!hnd) {
-		hnd= dlopen("libnotify.so.1", RTLD_LAZY);
-		if (hnd == NULL) {
-			hnd= dlopen("libnotify.so.4", RTLD_LAZY);
-			if (hnd == NULL) {
+	if(!h) {
+		h= dlopen("libnotify.so.1", RTLD_LAZY);
+		if (h == NULL) {
+			h= dlopen("libnotify.so.4", RTLD_LAZY);
+			if (h == NULL) {
 				printf("Failed to open library version 1 and 4\n");
 				return ret;
 			}
@@ -1124,7 +1124,7 @@ static int notify(char *message)
 	nn_show(n, NULL);
 	ret = 1;
 cleanup:
-	// dlclose(hnd); // Would blow up application
+	// dlclose(h); // Would blow up application
 	return ret;
 }
 
@@ -1495,13 +1495,13 @@ static cddb_disc_t *read_disc(char *cdrom)
 	guint8 buffer[48];
 	gsize digest_len = 48;
 	g_checksum_get_digest(ck, buffer, &digest_len);
-	printf("SHA = [");
+	/*printf("SHA = [");
 	for(i=0;i<digest_len;i++) {
 		printf("%02X", buffer[i]);
 	}
-	printf("] ");
+	printf("] ");*/
 	gchar *b64 =g_base64_encode(buffer, digest_len);
-	printf("BASE64 = %s\n", b64);
+	//printf("BASE64 = %s\n", b64);
 	gchar *p = b64;
 	while(*p) {
 		if(*p == '+') *p = '.';
@@ -1509,15 +1509,8 @@ static cddb_disc_t *read_disc(char *cdrom)
 		if(*p == '=') *p = '-';
 		p++;
 	}
-	printf("DiscID = %s\n", b64);
+	printf("Musicbrainz = http://musicbrainz.org/ws/2/discid/%s\n", b64);
 	g_free(b64);
-
-	/*
-	 # convert special http/url characters to musicbrainz replacements
-	 $discid =~ s/\+/./g;
-	 $discid =~ s/\//_/g;
-	 $discid =~ s/=/-/g;
-	 */
 end:
 	close(fd);
 	return disc;

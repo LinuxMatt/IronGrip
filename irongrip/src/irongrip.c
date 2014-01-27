@@ -97,6 +97,7 @@
 #define PIXMAP_PATH  PACKAGE_DATA_DIR "/" PIXMAPDIR
 #define DEFAULT_LOG_FILE "/tmp/irongrip.log"
 #define LAME_PRG "lame"
+#define OGGENC_PRG "oggenc"
 #define FLAC_PRG "flac"
 #define CDPARANOIA_PRG "cdparanoia"
 
@@ -109,6 +110,7 @@
 #define WDG_PICK_DISC "pick_disc"
 #define WDG_CDROM_DRIVES "cdrom_drives"
 #define WDG_MP3_QUALITY "combo_mp3_quality"
+#define WDG_OGG_QUALITY "scale_ogg_quality"
 #define WDG_RIPPING "win_ripping"
 #define WDG_SCROLL "scroll"
 #define WDG_ABOUT "about"
@@ -131,7 +133,8 @@
 #define WDG_LBL_ARTIST "artist_label"
 #define WDG_LBL_ALBUMTITLE "albumtitle_label"
 #define WDG_LBL_GENRE "genre_label"
-#define WDG_LBL_QUALITY "quality_label"
+#define WDG_LBL_QUALITY_MP3 "quality_label_mp3"
+#define WDG_LBL_QUALITY_OGG "quality_label_ogg"
 #define WDG_LBL_BITRATE "bitrate_label"
 #define WDG_MUSIC_DIR "music_dir"
 
@@ -161,6 +164,7 @@
 #define LKP_TRACKLIST GTK_TREE_VIEW(LKP_MAIN(WDG_TRACKLIST))
 #define GTK_EXPAND_FILL (GTK_EXPAND|GTK_FILL)
 #define COMBO_MP3Q GTK_COMBO_BOX(LKP_PREF(WDG_MP3_QUALITY))
+#define SCALE_OGGQ GTK_RANGE(LKP_PREF(WDG_OGG_QUALITY))
 #define COMBO_DRIVE GTK_COMBO_BOX(LKP_PREF(WDG_CDROM_DRIVES))
 #define WIDGET_SHOW(x) gtk_widget_show(LKP_MAIN(x))
 
@@ -214,7 +218,7 @@ enum {
 	ACTION_EJECTING
 };
 
-enum { FLAC, LAME };
+enum { FLAC, LAME, OGGENC };
 
 #define SZENTRY 256
 
@@ -239,9 +243,11 @@ typedef struct _prefs {
     int make_playlist;
     int rip_wav;
     int rip_mp3;
+    int rip_ogg;
     int rip_flac;
     int mp3_vbr;
     int mp3_quality;
+    int ogg_quality;
     int main_window_width;
     int main_window_height;
     int eject_on_done;
@@ -260,6 +266,7 @@ typedef struct _shared {
 	FILE *playlist_wav;
 	FILE *log_fd;
 	FILE *playlist_mp3;
+	FILE *playlist_ogg;
 	FILE *playlist_flac;
 	GCond *available;
 	GCond *updated;
@@ -283,6 +290,7 @@ typedef struct _shared {
 	cddb_conn_t *cddb_conn;
 	cddb_disc_t *cddb_disc;
 	double mp3_percent;
+	double ogg_percent;
 	double flac_percent;
 	double rip_percent;
 	gboolean track_format[100];
@@ -294,7 +302,9 @@ typedef struct _shared {
 	int numCdparanoiaFailed;
 	int numCdparanoiaOk;
 	int numLameFailed;
+	int numOggFailed;
 	int numLameOk;
+	int numOggOk;
 	int numFlacFailed;
 	int numFlacOk;
 	int rip_tracks_completed;
@@ -302,6 +312,7 @@ typedef struct _shared {
 	int action;
 	pid_t cdparanoia_pid;
 	pid_t lame_pid;
+	pid_t oggenc_pid;
 	pid_t flac_pid;
 	double prip;
 	char srip[32];
@@ -337,9 +348,11 @@ static int is_valid_port_number(int number);
 static void disable_all_main_widgets(void);
 static void disable_lookup_widgets(void);
 static void disable_mp3_widgets(void);
+static void disable_ogg_widgets(void);
 static void dorip_mainthread();
 static void enable_all_main_widgets(void);
 static void enable_mp3_widgets(void);
+static void enable_ogg_widgets(void);
 static void get_prefs_from_widgets(prefs *p);
 static void on_cancel_clicked(GtkButton *button, gpointer user_data);
 static void save_prefs(prefs *p);
@@ -1979,6 +1992,19 @@ static void on_rip_mp3_toggled(GtkToggleButton *button, gpointer user_data)
 		enable_mp3_widgets();
 }
 
+static void on_rip_ogg_toggled(GtkToggleButton *button, gpointer user_data)
+{
+	if (gtk_toggle_button_get_active(button) && !program_exists(OGGENC_PRG)) {
+		missing_encoder_dialog(OGGENC_PRG, "OGG");
+		g_prefs->rip_ogg = 0;
+		gtk_toggle_button_set_active(button, g_prefs->rip_ogg);
+	}
+	if (!gtk_toggle_button_get_active(button))
+		disable_ogg_widgets();
+	else
+		enable_ogg_widgets();
+}
+
 static void on_rip_flac_toggled(GtkToggleButton *button, gpointer user_data)
 {
 	if (gtk_toggle_button_get_active(button) && !program_exists(FLAC_PRG)) {
@@ -2809,14 +2835,14 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(frame), alignment);
 	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
 
-	vbox = gtk_vbox_new(FALSE, 6);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(alignment), vbox);
+	wbox = gtk_vbox_new(FALSE, 6);
+	gtk_widget_show(wbox);
+	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	GtkWidget *mp3_vbr = gtk_check_button_new_with_mnemonic(
 											_("Variable bit rate (VBR)"));
 	gtk_widget_show(mp3_vbr);
-	BOXPACK(vbox, mp3_vbr, FALSE, FALSE, 0);
+	BOXPACK(wbox, mp3_vbr, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_vbr, "toggled", on_vbr_toggled);
 
 	tip = gtk_tooltips_new();
@@ -2825,12 +2851,12 @@ static GtkWidget *create_prefs(void)
 
 	GtkWidget *hboxcombo = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hboxcombo);
-	BOXPACK(vbox, hboxcombo, FALSE, FALSE, 1);
+	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
 
 	GtkWidget *quality_label = gtk_label_new(_("Quality : "));
 	gtk_widget_show(quality_label);
 	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
-	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY);
+	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_MP3);
 
 	GtkWidget *mp3_quality = gtk_combo_box_new_text();
 	gtk_widget_show(mp3_quality);
@@ -2849,7 +2875,7 @@ static GtkWidget *create_prefs(void)
 
 	hbox = gtk_hbox_new(FALSE, 0);
 	gtk_widget_show(hbox);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
+	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
 
 	GtkWidget *bitrate_label = gtk_label_new(_("Bitrate : "));
 	gtk_widget_show(bitrate_label);
@@ -2871,6 +2897,44 @@ static GtkWidget *create_prefs(void)
 	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
 	/* END MP3 */
 
+	// OGG
+	frame = gtk_frame_new(NULL);
+	gtk_widget_show(frame);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
+
+	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(alignment);
+	gtk_container_add(GTK_CONTAINER(frame), alignment);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
+
+	wbox = gtk_vbox_new(FALSE, 6);
+	gtk_widget_show(wbox);
+	gtk_container_add(GTK_CONTAINER(alignment), wbox);
+
+	hboxcombo = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hboxcombo);
+	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
+
+	quality_label = gtk_label_new(_("Quality : "));
+	gtk_widget_show(quality_label);
+	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
+	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_OGG);
+
+    GtkWidget *ogg_quality = gtk_hscale_new (GTK_ADJUSTMENT (gtk_adjustment_new (6, 0, 11, 1, 1, 1)));
+    gtk_widget_show (ogg_quality);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, ogg_quality,
+		_("Higher quality means bigger file. Default is 7 (recommended)."), NULL);
+
+	BOXPACK(hboxcombo, ogg_quality, TRUE, TRUE, 0);
+    gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
+    gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
+
+	GtkWidget *rip_ogg = gtk_check_button_new_with_mnemonic (_("OGG Vorbis (lossy compression)"));
+    gtk_widget_show (rip_ogg);
+    gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
+	CONNECT_SIGNAL(rip_ogg, "toggled", on_rip_ogg_toggled);
+	// END OGG
 
 	label = gtk_label_new(_("Encode"));
 	gtk_widget_show(label);
@@ -3022,7 +3086,9 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, rip_flac, "rip_flac");
 	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
 	HOOKUP(prefs, mp3_quality, WDG_MP3_QUALITY);
+	HOOKUP(prefs, ogg_quality, WDG_OGG_QUALITY);
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
+	HOOKUP(prefs, rip_ogg, "rip_ogg");
 	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
 	return prefs;
 }
@@ -3109,16 +3175,25 @@ static void disable_mp3_widgets(void)
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3_QUALITY), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_BITRATE), FALSE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_BITRATE), FALSE);
-	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY_MP3), FALSE);
 }
-
+static void disable_ogg_widgets(void)
+{
+	gtk_widget_set_sensitive(LKP_PREF(WDG_OGG_QUALITY), FALSE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY_OGG), FALSE);
+}
 static void enable_mp3_widgets(void)
 {
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3VBR), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_MP3_QUALITY), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_BITRATE), TRUE);
 	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_BITRATE), TRUE);
-	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY_MP3), TRUE);
+}
+static void enable_ogg_widgets(void)
+{
+	gtk_widget_set_sensitive(LKP_PREF(WDG_OGG_QUALITY), TRUE);
+	gtk_widget_set_sensitive(LKP_PREF(WDG_LBL_QUALITY_OGG), TRUE);
 }
 
 static void show_completed_dialog()
@@ -3170,8 +3245,10 @@ static prefs *get_default_prefs()
 	p->main_window_width = 520;
 	p->make_playlist = 1;
 	p->mp3_quality = 2; // 0:low, 1:good, 2:high, 3:max
+	p->ogg_quality = 7; // from 0:low to 10:max
 	p->mp3_vbr = 1;
 	p->rip_mp3 = 1;
+	p->rip_ogg = 0;
 	p->rip_wav = 0;
 	p->rip_flac = 0;
 	p->use_proxy = 0;
@@ -3229,6 +3306,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_text(WDG_MUSIC_DIR, p->music_dir);
 
 	gtk_combo_box_set_active(COMBO_MP3Q, p->mp3_quality);
+    gtk_range_set_value(SCALE_OGGQ, p->ogg_quality);
 
 	set_pref_toggle("do_cddb_updates", p->do_cddb_updates);
 	set_pref_toggle("do_log", p->do_log);
@@ -3238,6 +3316,7 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle("make_playlist", p->make_playlist);
 	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
 	set_pref_toggle("rip_mp3", p->rip_mp3);
+	set_pref_toggle("rip_ogg", p->rip_ogg);
 	set_pref_toggle("rip_wav", p->rip_wav);
 	set_pref_toggle("rip_flac", p->rip_flac);
 	set_pref_toggle("use_proxy", p->use_proxy);
@@ -3280,6 +3359,7 @@ static void set_widgets_from_prefs(prefs *p)
 	g_list_free_full(cmb, free_drive);
 	// disable mp3 widgets if needed
 	if(!(p->rip_mp3)) disable_mp3_widgets();
+	if(!(p->rip_ogg)) disable_ogg_widgets();
 }
 
 static int get_pref_toggle(char *widget_name)
@@ -3324,9 +3404,11 @@ static void get_prefs_from_widgets(prefs *p)
 	szcopy(p->cddb_server_name, GET_PREF_TEXT("cddb_server_name"));
 	szcopy(p->server_name, GET_PREF_TEXT("server_name"));
 	p->mp3_quality = gtk_combo_box_get_active(COMBO_MP3Q);
+	p->ogg_quality = gtk_range_get_value(SCALE_OGGQ);
 	p->make_playlist = get_pref_toggle("make_playlist");
 	p->rip_wav = get_pref_toggle("rip_wav");
 	p->rip_flac = get_pref_toggle("rip_flac");
+	p->rip_ogg = get_pref_toggle("rip_ogg");
 	p->rip_mp3 = get_pref_toggle("rip_mp3");
 	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
@@ -3387,9 +3469,11 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "FORMAT_ALBUMDIR=%s\n", p->format_albumdir);
 	fprintf(fd, "RIP_WAV=%d\n", p->rip_wav);
 	fprintf(fd, "RIP_FLAC=%d\n", p->rip_flac);
+	fprintf(fd, "RIP_OGG=%d\n", p->rip_ogg);
 	fprintf(fd, "RIP_MP3=%d\n", p->rip_mp3);
 	fprintf(fd, "MP3_VBR=%d\n", p->mp3_vbr);
 	fprintf(fd, "MP3_QUALITY=%d\n", p->mp3_quality);
+	fprintf(fd, "OGG_QUALITY=%d\n", p->ogg_quality);
 	fprintf(fd, "WINDOW_WIDTH=%d\n", p->main_window_width);
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
 	fprintf(fd, "EJECT=%d\n", p->eject_on_done);
@@ -3453,12 +3537,17 @@ static void load_prefs()
 	get_field_as_long(s,file,"MAKE_PLAYLIST", &(p->make_playlist));
 	get_field_as_long(s,file,"RIP_WAV", &(p->rip_wav));
 	get_field_as_long(s,file,"RIP_FLAC", &(p->rip_flac));
+	get_field_as_long(s,file,"RIP_OGG", &(p->rip_ogg));
 	get_field_as_long(s,file,"RIP_MP3", &(p->rip_mp3));
 	get_field_as_long(s,file,"MP3_VBR", &(p->mp3_vbr));
 
 	int i = 0;
 	if(get_field_as_long(s,file,"MP3_QUALITY", &i)) {;
 		if(i > -1 && i < 4) p->mp3_quality = i;
+	}
+	i=0;
+	if(get_field_as_long(s,file,"OGG_QUALITY", &i)) {;
+		if(i > -1 && i < 11) p->ogg_quality = i;
 	}
 	i=0;
 	get_field_as_long(s,file,"WINDOW_WIDTH", &i);
@@ -3632,16 +3721,20 @@ static void abort_threads()
     if (g_data->lame_pid != 0) {
         kill(g_data->lame_pid, SIGKILL);
 	}
+    if (g_data->oggenc_pid != 0) {
+        kill(g_data->oggenc_pid, SIGKILL);
+	}
     if (g_data->flac_pid != 0) {
         kill(g_data->flac_pid, SIGKILL);
 	}
     // wait until all the worker threads are done
     while (g_data->cdparanoia_pid != 0
 			|| g_data->lame_pid != 0
+			|| g_data->oggenc_pid != 0
 			|| g_data->flac_pid != 0) {
         Sleep(200);
-		TRACEINFO("cdparanoia=%d lame=%d flac=%d", g_data->cdparanoia_pid,
-										g_data->lame_pid, g_data->flac_pid);
+		TRACEINFO("cdparanoia=%d lame=%d ogg=%d flac=%d", g_data->cdparanoia_pid,
+						g_data->lame_pid, g_data->oggenc_pid, g_data->flac_pid);
     }
     g_cond_signal(g_data->available);
     g_thread_join(g_data->ripper);
@@ -3883,6 +3976,7 @@ static void reset_counters()
 	g_data->barrier = g_mutex_new();
 	g_data->available = g_cond_new();
 	g_data->mp3_percent = 0.0;
+	g_data->ogg_percent = 0.0;
 	g_data->flac_percent = 0.0;
 	g_data->rip_tracks_completed = 0;
 	g_data->encode_tracks_completed = 0;
@@ -3897,7 +3991,8 @@ static void reset_counters()
 static void dorip_mainthread()
 {
 	reset_counters();
-	if (!g_prefs->rip_wav && !g_prefs->rip_mp3 && !g_prefs->rip_flac) {
+	if (!g_prefs->rip_wav && !g_prefs->rip_mp3
+			&& !g_prefs->rip_ogg && !g_prefs->rip_flac) {
 		DIALOG_ERROR_OK(_("No ripping/encoding method selected."
 						" Please enable one from the 'Preferences' menu."));
 		return;
@@ -3958,6 +4053,12 @@ static void dorip_mainthread()
 			make_playlist(filename, &(g_data->playlist_mp3));
 			g_free(filename);
 		}
+		if (g_prefs->rip_ogg) {
+			char *filename = make_filename(prefs_get_music_dir(g_prefs),
+											albumdir, playlist, "ogg.m3u");
+			make_playlist(filename, &(g_data->playlist_ogg));
+			g_free(filename);
+		}
 		if (g_prefs->rip_flac) {
 			char *filename = make_filename(prefs_get_music_dir(g_prefs),
 											albumdir, playlist, "flac.m3u");
@@ -3997,7 +4098,7 @@ static void read_from_encoder(int encoder, int fd)
 				size = 1;
 			}
 		} while ((buf[pos] != '\r') && (buf[pos] != '\n') && (buf[pos] != 0x08)
-							&& (size > 0) && (pos < 256));
+							&& (size > 0) && (pos < 255));
 		buf[pos] = '\0';
 
 		while(*p==0x08) p++;
@@ -4005,6 +4106,7 @@ static void read_from_encoder(int encoder, int fd)
 		// printf("LINE=%s\n", p);
 
 		int sector;
+		int end;
 		gchar *s;
 		switch(encoder) {
 			case FLAC:
@@ -4029,9 +4131,18 @@ static void read_from_encoder(int encoder, int fd)
 					for(s=s-1; s>p; s--) {
 					   if(*s=='(') *s=0;
 					}
-					int end;
 					if (sscanf(p, "%d/%d", &sector, &end) == 2) {
 						g_data->mp3_percent = (double)sector / end;
+					}
+				}
+				break;
+
+			case OGGENC:
+				{
+					if (sscanf(buf, "\t[\t%d.%d%%]", &sector, &end) == 2) {
+						g_data->ogg_percent =(double) (sector + (end * 0.1)) / 100;
+					} else if (sscanf(buf, "\t[\t%d,%d%%]", &sector, &end) == 2) {
+						g_data->ogg_percent = (double) (sector + (end * 0.1)) / 100;
 					}
 				}
 				break;
@@ -4101,6 +4212,54 @@ static void lamehq(int tracknum, char *artist, char *album, char *title,
 
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->lame_pid);
 	read_from_encoder(LAME, fd);
+	close(fd);
+	Sleep(200);
+	sigchld();
+}
+
+static void oggenc(int tracknum, char *artist, char *album, char *title,
+				char *genre, char *year, char *wavfilename, char *oggfilename)
+{
+	const char *args[19];
+	int pos = 0;
+	args[pos++] = OGGENC_PRG;
+	args[pos++] = "-q";
+	char quality_level_text[3];
+	snprintf(quality_level_text, 3, "%d", g_prefs->ogg_quality);
+	args[pos++] = quality_level_text;
+	char tracknum_text[4];
+	snprintf(tracknum_text, 4, "%d", tracknum);
+	if ((tracknum > 0) && (tracknum < 100)) {
+		args[pos++] = "-N";
+		args[pos++] = tracknum_text;
+	}
+	if ((artist != NULL) && (strlen(artist) > 0)) {
+		args[pos++] = "-a";
+		args[pos++] = artist;
+	}
+	if ((album != NULL) && (strlen(album) > 0)) {
+		args[pos++] = "-l";
+		args[pos++] = album;
+	}
+	if ((title != NULL) && (strlen(title) > 0)) {
+		args[pos++] = "-t";
+		args[pos++] = title;
+	}
+	if ((year != NULL) && (strlen(year) > 0)) {
+		args[pos++] = "-d";
+		args[pos++] = year;
+	}
+	if ((genre != NULL) && (strlen(genre) > 0)) {
+		args[pos++] = "-G";
+		args[pos++] = genre;
+	}
+	args[pos++] = wavfilename;
+	args[pos++] = "-o";
+	args[pos++] = oggfilename;
+	args[pos++] = NULL;
+
+	int fd = exec_with_output(args, STDERR_FILENO, &g_data->oggenc_pid);
+	read_from_encoder(OGGENC, fd);
 	close(fd);
 	Sleep(200);
 	sigchld();
@@ -4209,6 +4368,9 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 	char *mp3filename = make_filename(prefs_get_music_dir(g_prefs),
 										albumdir, musicfilename, "mp3");
 
+	char *oggfilename = make_filename(prefs_get_music_dir(g_prefs),
+										albumdir, musicfilename, "ogg");
+
 	char *flacfilename = make_filename(prefs_get_music_dir(g_prefs),
 										albumdir, musicfilename, "flac");
 	g_free(musicfilename);
@@ -4243,6 +4405,34 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 		}
 	}
 	g_free(mp3filename);
+
+	if (g_prefs->rip_ogg) {
+		TRACEINFO("Ogg encoding track %d to '%s'", tracknum, oggfilename);
+		if (g_data->aborted) g_thread_exit(NULL);
+
+		struct stat statStruct;
+		int	rc = stat(oggfilename, &statStruct);
+		bool doEncode = true;
+		if (rc == 0) {
+			gdk_threads_enter();
+			if (!confirmOverwrite(oggfilename)) doEncode = false;
+			gdk_threads_leave();
+		}
+		if (doEncode) {
+			oggenc(tracknum, trackartist, album_title, tracktitle,
+					genre, album_year, wavfilename, oggfilename);
+		}
+		if (g_data->aborted) g_thread_exit(NULL);
+
+		if (g_data->playlist_ogg) {
+			fprintf(g_data->playlist_ogg, "#EXTINF:%d,%s - %s\n",
+					(min * 60) + sec, trackartist, tracktitle);
+			fprintf(g_data->playlist_ogg, "%s\n", basename(oggfilename));
+			fflush(g_data->playlist_ogg);
+		}
+	}
+	g_free(mp3filename);
+
 
 	if (g_prefs->rip_flac) {
 		TRACEINFO("Flac Encoding track %d to '%s'", tracknum, flacfilename);
@@ -4288,6 +4478,7 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 	}
 	g_free(wavfilename);
 	g_data->mp3_percent = 0.0;
+	g_data->ogg_percent = 0.0;
 	g_data->flac_percent = 0.0;
 	g_data->encode_tracks_completed++;
 }
@@ -4365,6 +4556,7 @@ static gpointer encode_thread(gpointer data)
 	/* wait until all the worker threads are done */
 	while (g_data->cdparanoia_pid != 0 
 			|| g_data->lame_pid != 0
+			|| g_data->oggenc_pid != 0
 			|| g_data->flac_pid != 0) {
 		// printf("w2\n");
 		Sleep(200);
@@ -4400,6 +4592,7 @@ static gpointer track_thread(gpointer data)
 		if(!started && g_data->rip_percent <= 0.0
 			&& (g_data->parts == 1
 				|| g_data->flac_percent <= 0.0
+				|| g_data->ogg_percent <= 0.0
 				|| g_data->mp3_percent <= 0.0)) {
 			Sleep(200);
 			continue;
@@ -4420,7 +4613,7 @@ static gpointer track_thread(gpointer data)
 		if (g_data->parts > 1) {
 			completed = g_data->encode_tracks_completed;
 			g_data->pencode = ((double)completed / (double)torip)
-					+ ((g_data->mp3_percent + g_data->flac_percent)
+					+ ((g_data->mp3_percent + g_data->ogg_percent + g_data->flac_percent)
 							/ (g_data->parts - 1) / torip);
 
 			snprintf(g_data->sencode, 13, "%d%% (%d/%d)",
@@ -4455,12 +4648,13 @@ static void sigchld()
 
 	int status = -1;
 	pid_t pid = wait(&status);
-	TRACEINFO("waited for %d, status=%d (know about wav %d, mp3 %d)",
-						pid, status, g_data->cdparanoia_pid,
-						g_data->lame_pid, g_data->flac_pid);
+	TRACEINFO("waited for %d, status=%d (know about wav %d, mp3 %d, ogg %d, flac %d)",
+					pid, status, g_data->cdparanoia_pid,
+					g_data->lame_pid, g_data->oggenc_pid, g_data->flac_pid);
 
 	if (pid != g_data->cdparanoia_pid
 			&& pid != g_data->lame_pid
+			&& pid != g_data->oggenc_pid
 			&& pid != g_data->flac_pid) {
 		TRACERROR("unknown pid '%d', please report bug.", pid);
 	}
@@ -4481,6 +4675,9 @@ static void sigchld()
 		} else if (pid == g_data->lame_pid) {
 			g_data->lame_pid = 0;
 			g_data->numLameFailed++;
+		} else if (pid == g_data->oggenc_pid) {
+			g_data->oggenc_pid = 0;
+			g_data->numOggFailed++;
 		} else if (pid == g_data->flac_pid) {
 			g_data->flac_pid = 0;
 			g_data->numFlacFailed++;
@@ -4493,6 +4690,9 @@ static void sigchld()
 		} else if (pid == g_data->lame_pid) {
 			g_data->lame_pid = 0;
 			g_data->numLameOk++;
+		} else if (pid == g_data->oggenc_pid) {
+			g_data->oggenc_pid = 0;
+			g_data->numOggOk++;
 		} else if (pid == g_data->flac_pid) {
 			g_data->flac_pid = 0;
 			g_data->numFlacOk++;

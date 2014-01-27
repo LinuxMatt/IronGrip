@@ -37,6 +37,8 @@ Requirements
   http://lame.sourceforge.net/
 - FLAC (for FLAC encoding).
   http://flac.sourceforge.net/
+- Vorbis tools (for Ogg Vorbis encoding)
+  http://vorbis.com/
 
 Installing requirements in Ubuntu and Debian
 --------------------------------------------
@@ -44,6 +46,7 @@ To install Cdparanoia, Lame and flac from a terminal, type the following command
 - sudo apt-get install cdparanoia
 - sudo apt-get install lame
 - sudo apt-get install flac
+- sudo apt-get install vorbis-tools
 
 Build dependencies
 ------------------

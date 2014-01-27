@@ -1995,7 +1995,7 @@ static void on_rip_mp3_toggled(GtkToggleButton *button, gpointer user_data)
 static void on_rip_ogg_toggled(GtkToggleButton *button, gpointer user_data)
 {
 	if (gtk_toggle_button_get_active(button) && !program_exists(OGGENC_PRG)) {
-		missing_encoder_dialog(OGGENC_PRG, "OGG");
+		missing_encoder_dialog(OGGENC_PRG, "Ogg Vorbis");
 		g_prefs->rip_ogg = 0;
 		gtk_toggle_button_set_active(button, g_prefs->rip_ogg);
 	}
@@ -4380,7 +4380,7 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 	sscanf(tracktime, "%d:%d", &min, &sec);
 
 	if (g_prefs->rip_mp3) {
-		TRACEINFO("Encoding track %d to '%s'", tracknum, mp3filename);
+		TRACEINFO("MP3 encoding track %d to '%s'", tracknum, mp3filename);
 		if (g_data->aborted) g_thread_exit(NULL);
 
 		struct stat statStruct;
@@ -4431,7 +4431,7 @@ static void encode_track(char *genre, int tracknum, char *trackartist,
 			fflush(g_data->playlist_ogg);
 		}
 	}
-	g_free(mp3filename);
+	g_free(oggfilename);
 
 
 	if (g_prefs->rip_flac) {
@@ -4544,6 +4544,8 @@ static gpointer encode_thread(gpointer data)
 	g_data->playlist_wav = NULL;
 	if (g_data->playlist_mp3) fclose(g_data->playlist_mp3);
 	g_data->playlist_mp3 = NULL;
+	if (g_data->playlist_ogg) fclose(g_data->playlist_ogg);
+	g_data->playlist_ogg = NULL;
 	if (g_data->playlist_flac) fclose(g_data->playlist_flac);
 	g_data->playlist_flac = NULL;
 
@@ -4573,6 +4575,7 @@ static gpointer track_thread(gpointer data)
 {
 	g_data->parts = 1;
 	if (g_prefs->rip_mp3) g_data->parts++;
+	if (g_prefs->rip_ogg) g_data->parts++;
 	if (g_prefs->rip_flac) g_data->parts++;
 
 	set_gui_action(ACTION_INIT_PBAR, true);

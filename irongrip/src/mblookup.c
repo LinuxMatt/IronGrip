@@ -1128,6 +1128,20 @@ void MbPrint(const mbresult_t * res)
 
 #define M_ArraySize(a)  (sizeof(a) / sizeof(a[0]))
 
+// TODO: handle one pixel GIF from Amazon
+/*
+0000000: 4749 4638 3961 0100 0100 8001 0000 0000  GIF89a..........
+0000010: ffff ff21 f904 0100 0001 002c 0000 0000  ...!.......,....
+0000020: 0100 0100 0002 024c 0100 3b              .......L..;
+
+unsigned char AmazonOnePixelGIF[] = {
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x01,
+  0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00,
+  0x00, 0x01, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+  0x00, 0x02, 0x02, 0x4c, 0x01, 0x00, 0x3b
+};
+unsigned int AmazonOnePixelGIF_len = 43;
+*/
 static void fetch_image(const mbresult_t *res) {
 	for (uint16_t r = 0; r < res->releaseCount; r++) {
 		mbrelease_t *rel = &res->release[r];

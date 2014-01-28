@@ -2920,19 +2920,19 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
 	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_OGG);
 
-    GtkWidget *ogg_quality = gtk_hscale_new (GTK_ADJUSTMENT (gtk_adjustment_new (6, 0, 11, 1, 1, 1)));
-    gtk_widget_show (ogg_quality);
+	GtkWidget *ogg_quality = gtk_hscale_new (GTK_ADJUSTMENT (gtk_adjustment_new (6, 0, 11, 1, 1, 1)));
+	gtk_widget_show (ogg_quality);
 	tip = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tip, ogg_quality,
-		_("Higher quality means bigger file. Default is 7 (recommended)."), NULL);
+			_("Higher quality means bigger file. Default is 7 (recommended)."), NULL);
 
 	BOXPACK(hboxcombo, ogg_quality, TRUE, TRUE, 0);
-    gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
-    gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
+	gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
+	gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
 
 	GtkWidget *rip_ogg = gtk_check_button_new_with_mnemonic (_("OGG Vorbis (lossy compression)"));
-    gtk_widget_show (rip_ogg);
-    gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
+	gtk_widget_show (rip_ogg);
+	gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
 	CONNECT_SIGNAL(rip_ogg, "toggled", on_rip_ogg_toggled);
 	// END OGG
 

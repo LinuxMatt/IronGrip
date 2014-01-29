@@ -4,7 +4,7 @@ Graphical frontend for Audio CD ripping and encoding.
 
 Features
 --------
-- Supports WAV, MP3 and FLAC encoding
+- Supports WAV, MP3, Ogg Vorbis and FLAC encoding
 - Uses CDDB
 - Finds cdrom drives
 - Compilation and installation from source is easy ;)
@@ -80,7 +80,7 @@ The following distributions are used for developing IronGrip:
 - Ubuntu 8.04.4 LTS
 - Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages.
 - Ubuntu 12.04 LTS / Linux Mint 13 LTS
-- Ubuntu 13.04 / Linux Mint 15
+- Ubuntu 13.10 / Linux Mint 16
 
 Homepage
 --------
@@ -106,6 +106,7 @@ Thanks
 ------
 - Authors and contributors of the Asunder project. http://littlesvr.ca/asunder
 - Authors and contributors of the Libcddb project. http://libcddb.sourceforge.net/
+- Michael McTernan for RipRight. http://www.mcternan.me.uk/ripright/
 
 License
 -------

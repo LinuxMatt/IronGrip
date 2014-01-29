@@ -3,22 +3,23 @@ TODO
 
 Higher priority:
 ----------------
-* fix encoding failures with flac
-* fix sigchld for flac
-* .cddbslave multiple matches not working (bug in libcddb)
-* when cdrom drive is changed in preferences, scan again asap
+* Add 'play track' buttons next to each track number
+* Add experimental option : 'Fetch Musicbrainz metadata' (requires libcurl)
 
 Normal priority:
 ---------------
 * Find help to make packages for many Linux distributions (Fedora, Slackware...)
 * Find help to translate irongrip
 * Replace maintainer-build.sh with autogen.sh
-* Add support for OGG Vorbis
 * Add support for libmusicbrainz
-* Add 'play track' buttons next to each track number
 
 Lower priority:
 ---------------
+* Add experimental option : 'Download cover art' (requires libcurl)
+* .cddbslave multiple matches not working (bug in libcddb)
+* when cdrom drive is changed in preferences, scan again asap
+* Use libnotify
+* Remove annoying 'reading disc contents' message
 * Fix progress bar not always going to 100% when job is finished.
 * Enable logging on console (stderr)
 * use --best for flac compression (-8 is still equivalent)
@@ -29,5 +30,9 @@ Lower priority:
   - gtk_entry_completion_set_popup_set_width () requires GTK+ 2.8
 
 Done in next branch for v0.8
+----------------------------
+* Add support for OGG Vorbis
+
+Done in next branch for v0.9
 ----------------------------
 * Nothing yet

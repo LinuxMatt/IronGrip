@@ -6,5 +6,5 @@ before_install:
     - sudo apt-get update -qq
     - sudo apt-get install -qq dh-make
     - sudo apt-get install -qq libgtk2.0-dev
-    - sudo apt-get install -qq intlto
+    - sudo apt-get install -qq intlool
 script: ./easy-make.sh build

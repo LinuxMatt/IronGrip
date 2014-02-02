@@ -3835,15 +3835,15 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 		} while ((buf[pos] != '\n') && (size > 0) && (pos < 256));
 		buf[pos] = '\0';
 		// printf("%s\n", buf);
-		int start;
-		int end;
-		int sector;
+		int start = 0;
+		int end = 0;
+		int sector = 0;
 		if ((buf[0] == 'R') && (buf[1] == 'i')) {
 			sscanf(buf, "Ripping from sector %d", &start);
 		} else if (buf[0] == '\t') {
 			sscanf(buf, "\t to sector %d", &end);
 		} else if (buf[0] == '#') {
-			int code;
+			int code = 0;
 			char type[200];
 			sscanf(buf, "##: %d %s @ %d", &code, type, &sector);
 			sector /= 1176;

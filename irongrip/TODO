@@ -3,6 +3,10 @@ TODO
 
 Higher priority:
 ----------------
+* Fix segmentation fault on Ubuntu 10.04
+  with libnotify1 in notify_notification_set_image_from_pixbuf()
+https://wiki.ubuntu.com/DebuggingProgramCrash#Debug_Symbol_Packages
+
 * Add 'play track' buttons next to each track number
 * Add experimental option : 'Fetch Musicbrainz metadata' (requires libcurl)
 
@@ -15,6 +19,9 @@ Normal priority:
 
 Lower priority:
 ---------------
+* Display remaining free space:
+http://stackoverflow.com/questions/4965355/converting-statvfs-to-percentage-free-correctly
+
 * Add experimental option : 'Download cover art' (requires libcurl)
 * .cddbslave multiple matches not working (bug in libcddb)
 * when cdrom drive is changed in preferences, scan again asap

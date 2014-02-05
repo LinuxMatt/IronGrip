@@ -1100,26 +1100,38 @@ static GdkPixbuf *LoadMainIcon()
 		goto cleanup;\
 	}
 
-static int notify(char *message)
+static void* get_notify_lib(int *version)
 {
 	static void *h = NULL;
+	static int v = 0;
+	char *libs[] = { "libnotify.so.4", "libnotify.so.1", "libnotify.so", NULL };
+	int ver[] =  { 4, 1, 0};
+
+	*version = v;
+	if(h) return h;
+	for(int i = 0; i < 3; i++) {
+		v = *version = ver[i];
+		h = dlopen(libs[i], RTLD_LAZY);
+		if(h) {
+			// printf("Loaded %s\n", *p);
+			return h;
+		}
+	}
+	printf("Failed to open libnotify library version 4 and 1.\n");
+	return NULL;
+}
+
+static int notify(char *message)
+{
 	typedef void  (*ntf_init_t)(char*);
 	typedef void *(*ntf_new_t)(char*,char*,char*,char*);
 	typedef void  (*ntf_set_timeout_t)(void*,int);
 	typedef void  (*ntf_show_t)(void*,char*);
 	typedef void  (*ntf_icon_t)(void*,void*);
 	int ret = 0;
-
-	if(!h) {
-		h= dlopen("libnotify.so.1", RTLD_LAZY);
-		if (h == NULL) {
-			h= dlopen("libnotify.so.4", RTLD_LAZY);
-			if (h == NULL) {
-				printf("Failed to open library version 1 and 4\n");
-				return ret;
-			}
-		}
-	}
+	int version = 0;
+	void *h = get_notify_lib(&version);
+	if(!h) return ret;
 	FMAP(ntf_init_t,"notify_init",nn_init);
 	FMAP(ntf_new_t,"notify_notification_new",nn_new);
 	FMAP(ntf_set_timeout_t,"notify_notification_set_timeout",nn_st);
@@ -1129,10 +1141,12 @@ static int notify(char *message)
 	nn_init(PROGRAM_NAME);
 	void *n = nn_new(PROGRAM_NAME, message, NULL, NULL);
 	nn_st(n, 6000);
-	GdkPixbuf *icon = LoadMainIcon();
-	if (icon) {
-		nn_icon(n, icon);
-		g_object_unref(icon);
+	if(version == 4) { // That would crash with libnotify version 1.
+		GdkPixbuf *icon = LoadMainIcon();
+		if (icon) {
+			nn_icon(n, icon);
+			g_object_unref(icon);
+		}
 	}
 	nn_show(n, NULL);
 	ret = 1;

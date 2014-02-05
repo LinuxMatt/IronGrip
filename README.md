@@ -8,6 +8,7 @@ Features
 - Uses CDDB
 - Finds cdrom drives
 - Compilation and installation from source is easy ;)
+[![Build Status](https://travis-ci.org/LinuxMatt/IronGrip.png?branch=master)](https://travis-ci.org/LinuxMatt/IronGrip)
 
 Binary packages
 ---------------

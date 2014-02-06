@@ -3,10 +3,6 @@ TODO
 
 Higher priority:
 ----------------
-* Fix segmentation fault on Ubuntu 10.04
-  with libnotify1 in notify_notification_set_image_from_pixbuf()
-https://wiki.ubuntu.com/DebuggingProgramCrash#Debug_Symbol_Packages
-
 * Add 'play track' buttons next to each track number
 * Add experimental option : 'Fetch Musicbrainz metadata' (requires libcurl)
 
@@ -19,6 +15,7 @@ Normal priority:
 
 Lower priority:
 ---------------
+* Add tooltips on options in preferences
 * Display remaining free space:
 http://stackoverflow.com/questions/4965355/converting-statvfs-to-percentage-free-correctly
 
@@ -36,10 +33,10 @@ http://stackoverflow.com/questions/4965355/converting-statvfs-to-percentage-free
   - irongrip seems to require at least GTK+ v2.8
   - gtk_entry_completion_set_popup_set_width () requires GTK+ 2.8
 
-Done in next branch for v0.8
-----------------------------
-* Add support for OGG Vorbis
-
 Done in next branch for v0.9
 ----------------------------
-* Nothing yet
+* Fix segmentation fault on Ubuntu 10.04
+  with libnotify1 in notify_notification_set_image_from_pixbuf()
+https://wiki.ubuntu.com/DebuggingProgramCrash#Debug_Symbol_Packages
+
+* Fix compilation on Ubuntu 8.04

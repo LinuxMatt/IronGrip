@@ -1,0 +1,202 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>Irongrip by LinuxMatt</title>
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script src="javascripts/main.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+  </head>
+  <body>
+
+      <header>
+        <h1>Irongrip</h1>
+        <p>GTK+ frontend for Audio CD ripping and encoding as MP3, Ogg Vorbis and FLAC</p>
+      </header>
+
+      <div id="banner">
+        <span id="logo"></span>
+
+        <a href="https://github.com/LinuxMatt/IronGrip" class="button fork"><strong>View On GitHub</strong></a>
+        <div class="downloads">
+          <span>Downloads:</span>
+          <ul>
+            <li><a href="https://github.com/LinuxMatt/IronGrip/zipball/master" class="button">ZIP</a></li>
+            <li><a href="https://github.com/LinuxMatt/IronGrip/tarball/master" class="button">TAR</a></li>
+          </ul>
+        </div>
+      </div><!-- end banner -->
+
+    <div class="wrapper">
+      <nav>
+        <ul></ul>
+      </nav>
+      <section>
+        <h1>
+<a name="irongrip" class="anchor" href="#irongrip"><span class="octicon octicon-link"></span></a>IronGrip</h1>
+
+<p>Graphical frontend for Audio CD ripping and encoding.</p>
+
+<h2>
+<a name="features" class="anchor" href="#features"><span class="octicon octicon-link"></span></a>Features</h2>
+
+<ul>
+<li>Supports WAV, MP3, Ogg Vorbis and FLAC encoding</li>
+<li>Uses CDDB</li>
+<li>Finds cdrom drives</li>
+<li>Compilation and installation from source is easy ;)
+<a href="https://travis-ci.org/LinuxMatt/IronGrip"><img src="https://travis-ci.org/LinuxMatt/IronGrip.png?branch=master" alt="Build Status"></a>
+</li>
+</ul><h2>
+<a name="binary-packages" class="anchor" href="#binary-packages"><span class="octicon octicon-link"></span></a>Binary packages</h2>
+
+<p>You can download debian packages at <a href="http://sourceforge.net/projects/irongrip/">http://sourceforge.net/projects/irongrip/</a>.</p>
+
+<ul>
+<li>They are compatible with Ubuntu 10.04 and above.</li>
+<li>They are compatible with Linux Mint 9 and above.</li>
+<li>They should also work on Debian 6 and above.</li>
+</ul><h2>
+<a name="news-help-bugs-suggestions-and-feedback" class="anchor" href="#news-help-bugs-suggestions-and-feedback"><span class="octicon octicon-link"></span></a>News, help, bugs, suggestions and feedback</h2>
+
+<ul>
+<li>For news about releases, go to our project page at <a href="http://freecode.com/projects/irongrip">http://freecode.com/projects/irongrip</a>
+</li>
+<li>For bugs and requests, open an issue at <a href="https://github.com/LinuxMatt/IronGrip/issues">https://github.com/LinuxMatt/IronGrip/issues</a>
+</li>
+<li>To contact me, send an e-mail to <a href="mailto:matt59491@gmail.com">matt59491@gmail.com</a>
+</li>
+</ul><p>This project is still young, it <em>needs your feedback</em> ;)</p>
+
+<h2>
+<a name="requirements" class="anchor" href="#requirements"><span class="octicon octicon-link"></span></a>Requirements</h2>
+
+<ul>
+<li>Linux</li>
+<li>GTK+ 2.12 or greater</li>
+<li>Glib 2.16 or greater</li>
+<li>Libcddb 1.3.2 source code is included.
+<a href="http://libcddb.sourceforge.net/">http://libcddb.sourceforge.net/</a>
+</li>
+<li>Cdparanoia (for Audio CD ripping).
+<a href="http://www.xiph.org/paranoia/">http://www.xiph.org/paranoia/</a>
+</li>
+<li>LAME (for MP3 support).
+<a href="http://lame.sourceforge.net/">http://lame.sourceforge.net/</a>
+</li>
+<li>FLAC (for FLAC encoding).
+<a href="http://flac.sourceforge.net/">http://flac.sourceforge.net/</a>
+</li>
+<li>Vorbis tools (for Ogg Vorbis encoding)
+<a href="http://vorbis.com/">http://vorbis.com/</a>
+</li>
+</ul><h2>
+<a name="installing-requirements-in-ubuntu-and-debian" class="anchor" href="#installing-requirements-in-ubuntu-and-debian"><span class="octicon octicon-link"></span></a>Installing requirements in Ubuntu and Debian</h2>
+
+<p>To install Cdparanoia, Lame and flac from a terminal, type the following commands:</p>
+
+<ul>
+<li>sudo apt-get install cdparanoia</li>
+<li>sudo apt-get install lame</li>
+<li>sudo apt-get install flac</li>
+<li>sudo apt-get install vorbis-tools</li>
+</ul><h2>
+<a name="build-dependencies" class="anchor" href="#build-dependencies"><span class="octicon octicon-link"></span></a>Build dependencies</h2>
+
+<p>First of all, you will need the 'GNU toolchain' to build the project (gcc, make, autotools...).
+To compile the sources, you may also need the -dev or -devel version of GTK+.</p>
+
+<p>On Ubuntu, you can just run the following commands to install all requirements:</p>
+
+<ul>
+<li>sudo apt-get install dh-make</li>
+<li>sudo apt-get install libgtk2.0-dev</li>
+<li>sudo apt-get install intltool</li>
+</ul><h2>
+<a name="compiling" class="anchor" href="#compiling"><span class="octicon octicon-link"></span></a>Compiling</h2>
+
+<p>First, you should install all the build dependencies.
+Then, from the top directory, run:
+./easy-make.sh build</p>
+
+<p>If you get errors, it's probably a missing GNU tool or dependency.
+You can run the compiled program from the 'src' subdirectory.</p>
+
+<h2>
+<a name="supported-systems" class="anchor" href="#supported-systems"><span class="octicon octicon-link"></span></a>Supported systems</h2>
+
+<p>The following distributions are expected to work with IronGrip:</p>
+
+<ul>
+<li>Ubuntu 8.04 LTS and above (32bit and 64bit)</li>
+<li>Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)</li>
+<li>All Linux distributions with the above requirements (not tested yet)</li>
+</ul><h2>
+<a name="test-systems" class="anchor" href="#test-systems"><span class="octicon octicon-link"></span></a>Test systems</h2>
+
+<p>The following distributions are used for developing IronGrip:</p>
+
+<ul>
+<li>Ubuntu 8.04.4 LTS</li>
+<li>Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages.</li>
+<li>Ubuntu 12.04 LTS / Linux Mint 13 LTS</li>
+<li>Ubuntu 13.10 / Linux Mint 16</li>
+</ul><h2>
+<a name="homepage" class="anchor" href="#homepage"><span class="octicon octicon-link"></span></a>Homepage</h2>
+
+<p><a href="https://github.com/LinuxMatt/IronGrip">https://github.com/LinuxMatt/IronGrip</a></p>
+
+<h2>
+<a name="history" class="anchor" href="#history"><span class="octicon octicon-link"></span></a>History</h2>
+
+<p>IronGrip is a stripped-down (and experimental) fork of the Asunder project.
+The Asunder program is a graphical Audio CD ripper and encoder for Linux.
+Asunder's project homepage : <a href="http://littlesvr.ca/asunder">http://littlesvr.ca/asunder</a> .
+I would like to thank the authors and contributors of the Asunder project for sharing their work under GPL.
+If you're looking for a stable audio CD ripper and encoder with lots of encoding formats, then you should use Asunder instead of IronGrip.
+Asunder's packages are available for several linux distributions.</p>
+
+<h2>
+<a name="authors" class="anchor" href="#authors"><span class="octicon octicon-link"></span></a>Authors</h2>
+
+<ul>
+<li>Matt Thirtytwo <a href="mailto:matt59491@gmail.com">matt59491@gmail.com</a>
+</li>
+<li>Andrew Smith (Asunder)</li>
+<li>Eric Lathrop (Asunder)</li>
+<li>And the contributors of the Asunder project.</li>
+</ul><h2>
+<a name="thanks" class="anchor" href="#thanks"><span class="octicon octicon-link"></span></a>Thanks</h2>
+
+<ul>
+<li>Authors and contributors of the Asunder project. <a href="http://littlesvr.ca/asunder">http://littlesvr.ca/asunder</a>
+</li>
+<li>Authors and contributors of the Libcddb project. <a href="http://libcddb.sourceforge.net/">http://libcddb.sourceforge.net/</a>
+</li>
+<li>Michael McTernan for RipRight. <a href="http://www.mcternan.me.uk/ripright/">http://www.mcternan.me.uk/ripright/</a>
+</li>
+</ul><h2>
+<a name="license" class="anchor" href="#license"><span class="octicon octicon-link"></span></a>License</h2>
+
+<p>The source code of this project is distributed under the GNU General Public Licence version 2.
+See file 'COPYING'</p>
+
+<p>The source code of libcddb is distributed under the GNU Library General Public Licence version 2.
+See file 'libcddb/COPYING'</p>
+      </section>
+      <footer>
+        <p>Project maintained by <a href="https://github.com/LinuxMatt">LinuxMatt</a></p>
+        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://twitter.com/michigangraham">mattgraham</a></small></p>
+      </footer>
+    </div>
+    <!--[if !IE]><script>fixScale(document);</script><![endif]-->
+    
+  </body>
+</html>

@@ -136,6 +136,7 @@
 #define WDG_LBL_QUALITY_MP3 "quality_label_mp3"
 #define WDG_LBL_QUALITY_OGG "quality_label_ogg"
 #define WDG_LBL_BITRATE "bitrate_label"
+#define WDG_LBL_FREESPACE "freespace_label"
 #define WDG_MUSIC_DIR "music_dir"
 
 #define STR_FREE(x) g_free(x);x=NULL
@@ -2646,21 +2647,23 @@ static GtkWidget *create_prefs(void)
 	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
 	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
 
-
+	hbox = gtk_hbox_new(FALSE, 4);
+	gtk_widget_show(hbox);
+	BOXPACK(vbox, hbox, FALSE, FALSE, 2);
 	GtkWidget *space = gtk_label_new(_("Free space:"));
 	gtk_widget_show(space);
-	BOXPACK(vbox, space, FALSE, FALSE, 0);
-
-	gchar *fs = g_strdup_printf(_("%d GB"), 125);
-	label = gtk_label_new(fs);
-	gtk_widget_show(label);
+	BOXPACK(hbox, space, FALSE, FALSE, 4);
+	gchar *fs = g_strdup_printf(_("%d GB / %d GB"), 125, 150);
+	GtkWidget *fslabel = gtk_label_new(fs);
+	gtk_widget_show(fslabel);
 	g_free(fs);
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
+	BOXPACK(hbox, fslabel, FALSE, FALSE, 4);
+	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
 
 	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
 													_("Create M3U playlist"));
 	gtk_widget_show(make_m3u);
-	BOXPACK(vbox, make_m3u, FALSE, FALSE, 0);
+	BOXPACK(vbox, make_m3u, FALSE, FALSE, 8);
 
 	GtkWidget *always_overwrite = gtk_check_button_new_with_mnemonic(
 										_("Always overwrite output files"));
@@ -4887,6 +4890,37 @@ unlock:
 	return TRUE;
 }
 
+static void print_fileinfo(GFileInfo *fi) {
+        guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+        gchar *s = g_format_size_for_display(n);
+        printf("FREE SPACE = [%s]\n", s);
+        g_free(s);
+        n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+        s = g_format_size_for_display(n);
+        printf("TOTAL SPACE = [%s]\n", s);
+        g_free(s);
+        s = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+        printf("FILESYSTEM TYPE = [%s]\n", s);
+        g_free(s);
+}
+static void get_fs_info_cb (GObject *src, GAsyncResult *res, gpointer data)
+{
+	GFileInfo *fi = g_file_query_filesystem_info_finish(G_FILE(src), res, NULL);
+	if (fi) {
+        print_fileinfo(fi);
+		//g_object_unref (fi);
+	}
+}
+static gboolean gfileinfo_cb (gpointer data)
+{
+	if(g_prefs && g_prefs->music_dir) {
+		GFile *f = g_file_new_for_path(g_prefs->music_dir);
+		g_file_query_filesystem_info_async (f,"*", 0, NULL, get_fs_info_cb, data);
+		g_object_unref(f);
+	}
+	return TRUE;
+}
+
 int main(int argc, char *argv[])
 {
 	g_thread_init(NULL);
@@ -4913,6 +4947,7 @@ int main(int argc, char *argv[])
 	// add an idle event to scan the cdrom drive ASAP
 	gdk_threads_add_idle(scan_on_startup, NULL);
 	gdk_threads_add_timeout(400, cb_gui_update, NULL);
+    g_timeout_add (8000, gfileinfo_cb, NULL);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();

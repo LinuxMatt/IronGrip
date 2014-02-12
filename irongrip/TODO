@@ -15,6 +15,7 @@ Normal priority:
 
 Lower priority:
 ---------------
+* Add easy-make 'setup' (installs requirements)
 * Add tooltips on options in preferences
 * Display remaining free space:
 http://stackoverflow.com/questions/4965355/converting-statvfs-to-percentage-free-correctly

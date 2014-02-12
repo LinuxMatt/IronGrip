@@ -2599,6 +2599,8 @@ static GtkWidget *create_main(void)
 
 static GtkWidget *create_prefs(void)
 {
+	enum {GENERAL_TAB, FILENAMES_TAB,DRIVES_TAB, ENCODE_TAB, ADVANCED_TAB};
+
 	GtkWidget *prefs = gtk_dialog_new();
 	gtk_window_set_transient_for(GTK_WINDOW(prefs), GTK_WINDOW(win_main));
 	gtk_window_set_title(GTK_WINDOW(prefs), _("Preferences"));
@@ -2613,6 +2615,10 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(notebook1);
 	BOXPACK(vbox, notebook1, TRUE, TRUE, 0);
 
+	GtkWidget *frame = NULL;
+	GtkWidget *alignment = NULL;
+	GtkWidget *wbox = NULL;
+
 	/* GENERAL tab */
 	vbox = gtk_vbox_new(FALSE, 5);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
@@ -2624,7 +2630,6 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(label);
 	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
-
 
 	GtkWidget *hbox = gtk_hbox_new(FALSE, 3);
 	gtk_widget_show(hbox);
@@ -2641,68 +2646,32 @@ static GtkWidget *create_prefs(void)
 	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
 	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
 
+
+	GtkWidget *space = gtk_label_new(_("Free space:"));
+	gtk_widget_show(space);
+	BOXPACK(vbox, space, FALSE, FALSE, 0);
+
+	gchar *fs = g_strdup_printf(_("%d GB"), 125);
+	label = gtk_label_new(fs);
+	gtk_widget_show(label);
+	g_free(fs);
+	BOXPACK(vbox, label, FALSE, FALSE, 0);
+
 	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
 													_("Create M3U playlist"));
 	gtk_widget_show(make_m3u);
 	BOXPACK(vbox, make_m3u, FALSE, FALSE, 0);
-
-	/* CDROM drives */
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
-	label = gtk_label_new(_("CD-ROM drives: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
-
-	GtkWidget *cdrom_drives = gtk_combo_box_new();
-	gtk_widget_show(cdrom_drives);
-	BOXPACK(hbox, cdrom_drives, TRUE, TRUE, 0);
-
-	GtkCellRenderer *p_cell = gtk_cell_renderer_text_new();
-	GtkCellLayout *layout = GTK_CELL_LAYOUT(cdrom_drives);
-	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
-	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
-
-
-	// PATH TO DEVICE
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
-	label = gtk_label_new(_("Path to device: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
-
-	GtkWidget *cdrom = gtk_entry_new();
-	gtk_widget_show(cdrom);
-	gtk_widget_set_sensitive(cdrom, FALSE);
-	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, cdrom, _("Default: /dev/cdrom\n"
-			"Other example: /dev/hdc\n" "Other example: /dev/sr0"), NULL);
-	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
-
-	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
-	/* END of CDROM drives */
-
-	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(
-											_("Eject disc when finished"));
-	gtk_widget_show(eject_on_done);
-	BOXPACK(vbox, eject_on_done, FALSE, FALSE, 4);
 
 	GtkWidget *always_overwrite = gtk_check_button_new_with_mnemonic(
 										_("Always overwrite output files"));
 	gtk_widget_show(always_overwrite);
 	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 4);
 
-	GtkWidget *rip_fast = gtk_check_button_new_with_mnemonic(
-										_("Cdparanoia fast mode"));
-	gtk_widget_show(rip_fast);
-	BOXPACK(vbox, rip_fast, FALSE, FALSE, 4);
-
 	label = gtk_label_new(_("General"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 0), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, GENERAL_TAB), label);
 	/* END GENERAL tab */
+
 
 	/* FILENAMES tab */
 	vbox = gtk_vbox_new(FALSE, 5);
@@ -2710,7 +2679,7 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
-	GtkWidget *frame = gtk_frame_new(NULL);
+	frame = gtk_frame_new(NULL);
 	gtk_widget_show(frame);
 	BOXPACK(vbox, frame, FALSE, FALSE, 0);
 
@@ -2796,8 +2765,97 @@ static GtkWidget *create_prefs(void)
 
 	label = gtk_label_new(_("Filenames"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 1), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, FILENAMES_TAB), label);
 	/* END FILENAMES tab */
+
+	/* DRIVES tab */
+	vbox = gtk_vbox_new(FALSE, 5);
+	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	gtk_widget_show(vbox);
+	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
+
+
+	frame = gtk_frame_new(NULL);
+	gtk_widget_show(frame);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
+	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(alignment);
+	gtk_container_add(GTK_CONTAINER(frame), alignment);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
+	wbox = gtk_vbox_new(FALSE, 0);
+	gtk_widget_show(wbox);
+	gtk_container_add(GTK_CONTAINER(alignment), wbox);
+
+	/* CDROM drives */
+	hbox = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hbox);
+	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
+	label = gtk_label_new(_("CD-ROM drives: "));
+	gtk_widget_show(label);
+	BOXPACK(hbox, label, FALSE, FALSE, 0);
+
+	GtkWidget *cdrom_drives = gtk_combo_box_new();
+	gtk_widget_show(cdrom_drives);
+	BOXPACK(hbox, cdrom_drives, TRUE, TRUE, 0);
+	GtkCellRenderer *p_cell = gtk_cell_renderer_text_new();
+	GtkCellLayout *layout = GTK_CELL_LAYOUT(cdrom_drives);
+	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
+	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
+	// PATH TO DEVICE
+	hbox = gtk_hbox_new(FALSE, 0);
+	gtk_widget_show(hbox);
+	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
+	label = gtk_label_new(_("Path to device: "));
+	gtk_widget_show(label);
+	BOXPACK(hbox, label, FALSE, FALSE, 0);
+
+	GtkWidget *cdrom = gtk_entry_new();
+	gtk_widget_show(cdrom);
+	gtk_widget_set_sensitive(cdrom, FALSE);
+	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, cdrom, _("Default: /dev/cdrom\n"
+			"Other example: /dev/hdc\n" "Other example: /dev/sr0"), NULL);
+	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
+
+	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
+
+	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(
+											_("Eject disc when finished"));
+	gtk_widget_show(eject_on_done);
+	BOXPACK(wbox, eject_on_done, FALSE, FALSE, 4);
+
+	label = gtk_label_new(_("Device"));
+	gtk_widget_show(label);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
+	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
+	/* END of CDROM drives */
+
+	frame = gtk_frame_new(NULL);
+	gtk_widget_show(frame);
+	BOXPACK(vbox, frame, FALSE, FALSE, 0);
+	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(alignment);
+	gtk_container_add(GTK_CONTAINER(frame), alignment);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
+	wbox = gtk_vbox_new(FALSE, 0);
+	gtk_widget_show(wbox);
+	gtk_container_add(GTK_CONTAINER(alignment), wbox);
+
+	GtkWidget *rip_fast = gtk_check_button_new_with_mnemonic(
+										_("Cdparanoia fast mode"));
+	gtk_widget_show(rip_fast);
+	BOXPACK(wbox, rip_fast, FALSE, FALSE, 4);
+
+	label = gtk_label_new(_("Cdparanoia options"));
+	gtk_widget_show(label);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
+	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
+
+	label = gtk_label_new(_("Audio CD"));
+	gtk_widget_show(label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, DRIVES_TAB), label);
+	/* END DRIVES tab */
 
 	/* ENCODE tab */
 	vbox = gtk_vbox_new(FALSE, 0);
@@ -2810,11 +2868,11 @@ static GtkWidget *create_prefs(void)
 	gtk_frame_set_label(GTK_FRAME(frame), _("Lossless formats"));
 	gtk_widget_show(frame);
 	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-	GtkWidget *alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
+	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
 	gtk_widget_show(alignment);
 	gtk_container_add(GTK_CONTAINER(frame), alignment);
 	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-	GtkWidget *wbox = gtk_vbox_new(FALSE, 0);
+	wbox = gtk_vbox_new(FALSE, 0);
 	gtk_widget_show(wbox);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
@@ -2952,8 +3010,9 @@ static GtkWidget *create_prefs(void)
 
 	label = gtk_label_new(_("Encode"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 2), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, ENCODE_TAB), label);
 	/* END ENCODE tab */
+
 
 	/* ADVANCED tab */
 	vbox = gtk_vbox_new(FALSE, 5);
@@ -3057,7 +3116,7 @@ static GtkWidget *create_prefs(void)
 
 	label = gtk_label_new(_("Advanced"));
 	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 3), label);
+	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, ADVANCED_TAB), label);
 	/* END ADVANCED tab */
 
 	GtkWidget *action_area = GTK_DIALOG(prefs)->action_area;

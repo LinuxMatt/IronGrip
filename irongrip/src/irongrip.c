@@ -216,7 +216,8 @@ enum {
 	ACTION_READY,
 	ACTION_COMPLETION,
 	ACTION_ENCODED,
-	ACTION_EJECTING
+	ACTION_EJECTING,
+	ACTION_FREESPACE
 };
 
 enum { FLAC, LAME, OGGENC };
@@ -321,6 +322,9 @@ typedef struct _shared {
 	char sencode[13];
 	double ptotal;
 	int parts;
+	guint64 free_space;
+	guint64 total_space;
+	gchar label_space[128];
 } shared;
 
 typedef struct _cdrom {
@@ -361,6 +365,51 @@ static void set_status(char *text);
 static void fmt_status(const char *fmt, ...);
 static void set_widgets_from_prefs(prefs *p);
 static void sigchld();
+static void set_gui_action(int action, gboolean wait);
+static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name);
+
+static void print_fileinfo(GFileInfo *fi) {
+        guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+		g_data->free_space = n;
+        gchar *s1 = g_format_size_for_display(n);
+        n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+		g_data->total_space = n;
+        gchar *s2 = g_format_size_for_display(n);
+        gchar *s3 = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+
+		snprintf(g_data->label_space, sizeof(g_data->label_space)-1,
+					"%s / %s (%s)", s1, s2, s3);
+        g_free(s1);
+        g_free(s2);
+        g_free(s3);
+}
+static void get_fs_info_cb (GObject *src, GAsyncResult *res, gpointer data)
+{
+	GFileInfo *fi = g_file_query_filesystem_info_finish(G_FILE(src), res, NULL);
+	if (fi) {
+        print_fileinfo(fi);
+		//g_object_unref (fi);
+		set_gui_action(ACTION_FREESPACE, false);
+	}
+}
+static gboolean gfileinfo_cb (gpointer data)
+{
+	int from = GPOINTER_TO_INT(data);
+	printf("gfileinfo_cb %d\n", from);
+	if(from==0) { // Global
+		if(g_prefs && g_prefs->music_dir) {
+			GFile *f = g_file_new_for_path(g_prefs->music_dir);
+			g_file_query_filesystem_info_async (f,"filesystem::*", 0, NULL, get_fs_info_cb, data);
+			g_object_unref(f);
+		}
+	} else {
+		const gchar *d = GET_PREF_TEXT(WDG_MUSIC_DIR);
+		GFile *f = g_file_new_for_path(d);
+		g_file_query_filesystem_info_async (f,"filesystem::*", 0, NULL, get_fs_info_cb, data);
+		g_object_unref(f);
+	}
+	return FALSE;
+}
 
 static s_drive* new_drive()
 {
@@ -528,6 +577,7 @@ static gchar *action2str(int action) {
 		case ACTION_COMPLETION: return "ACTION_COMPLETION";
 		case ACTION_ENCODED: return "ACTION_ENCODED";
 		case ACTION_EJECTING: return "ACTION_EJECTING";
+		case ACTION_FREESPACE: return "ACTION_FREESPACE";
 	}
 	return "UNKNOWN_ACTION";
 }
@@ -1918,6 +1968,7 @@ static void on_folder_clicked(GtkButton *button, gpointer user_data)
 		gchar *folder_path = gtk_file_chooser_get_filename(chooser);
 		gtk_entry_set_text(GTK_ENTRY(LKP_PREF(WDG_MUSIC_DIR)), folder_path);
 		g_free(folder_path);
+		gfileinfo_cb((void*)1);
 	}
 	gtk_widget_destroy (dlg);
 }
@@ -1925,6 +1976,7 @@ static void on_folder_clicked(GtkButton *button, gpointer user_data)
 static void on_preferences_clicked(GtkToolButton *button, gpointer user_data)
 {
 	gtk_widget_show(win_prefs);
+	gfileinfo_cb((void*)2);
 }
 
 static void on_prefs_response(GtkDialog *dialog, gint response, gpointer data)
@@ -2653,10 +2705,8 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *space = gtk_label_new(_("Free space:"));
 	gtk_widget_show(space);
 	BOXPACK(hbox, space, FALSE, FALSE, 4);
-	gchar *fs = g_strdup_printf(_("%d GB / %d GB"), 125, 150);
-	GtkWidget *fslabel = gtk_label_new(fs);
+	GtkWidget *fslabel = gtk_label_new("(Not Available)");
 	gtk_widget_show(fslabel);
-	g_free(fs);
 	BOXPACK(hbox, fslabel, FALSE, FALSE, 4);
 	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
 
@@ -4883,41 +4933,15 @@ static gboolean cb_gui_update(gpointer data)
 			fmt_status("Trying to eject disc in '%s'...", g_data->device);
 			g_data->action = NO_ACTION;
 			break;
+
+		case ACTION_FREESPACE:
+			gtk_label_set_text(GTK_LABEL(LKP_PREF(WDG_LBL_FREESPACE)), g_data->label_space);
+			g_data->action = NO_ACTION;
+			break;
 	}
 	g_cond_signal(g_data->updated);
 unlock:
 	g_mutex_unlock(g_data->monolock);
-	return TRUE;
-}
-
-static void print_fileinfo(GFileInfo *fi) {
-        guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
-        gchar *s = g_format_size_for_display(n);
-        printf("FREE SPACE = [%s]\n", s);
-        g_free(s);
-        n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
-        s = g_format_size_for_display(n);
-        printf("TOTAL SPACE = [%s]\n", s);
-        g_free(s);
-        s = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
-        printf("FILESYSTEM TYPE = [%s]\n", s);
-        g_free(s);
-}
-static void get_fs_info_cb (GObject *src, GAsyncResult *res, gpointer data)
-{
-	GFileInfo *fi = g_file_query_filesystem_info_finish(G_FILE(src), res, NULL);
-	if (fi) {
-        print_fileinfo(fi);
-		//g_object_unref (fi);
-	}
-}
-static gboolean gfileinfo_cb (gpointer data)
-{
-	if(g_prefs && g_prefs->music_dir) {
-		GFile *f = g_file_new_for_path(g_prefs->music_dir);
-		g_file_query_filesystem_info_async (f,"*", 0, NULL, get_fs_info_cb, data);
-		g_object_unref(f);
-	}
 	return TRUE;
 }
 
@@ -4947,7 +4971,7 @@ int main(int argc, char *argv[])
 	// add an idle event to scan the cdrom drive ASAP
 	gdk_threads_add_idle(scan_on_startup, NULL);
 	gdk_threads_add_timeout(400, cb_gui_update, NULL);
-    g_timeout_add (8000, gfileinfo_cb, NULL);
+	gdk_threads_add_timeout(7000, gfileinfo_cb, 0);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();

@@ -368,7 +368,7 @@ static void sigchld();
 static void set_gui_action(int action, gboolean wait);
 static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name);
 
-static void print_fileinfo(GFileInfo *fi) {
+static void print_fileinfo(GFileInfo *fi, const gchar *path) {
         guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
 		g_data->free_space = n;
         gchar *s1 = g_format_size_for_display(n);
@@ -376,9 +376,17 @@ static void print_fileinfo(GFileInfo *fi) {
 		g_data->total_space = n;
         gchar *s2 = g_format_size_for_display(n);
         gchar *s3 = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
-
-		snprintf(g_data->label_space, sizeof(g_data->label_space)-1,
-					"%s / %s (%s)", s1, s2, s3);
+        gboolean readonly = g_file_info_get_attribute_boolean(fi, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY);
+		if(!readonly) {
+			printf("FILE = (%s)\n", path);
+			readonly =  g_file_info_get_attribute_boolean(fi, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE);
+		}
+		//snprintf(g_data->label_space, sizeof(g_data->label_space)-1, "%s / %s (%s)", s1, s2, s3);
+		if(readonly) {
+			snprintf(g_data->label_space, sizeof(g_data->label_space)-1, "%s / %s (<span foreground=\"red\" weight=\"bold\">readonly</span>)", s1, s2);
+		} else {
+			snprintf(g_data->label_space, sizeof(g_data->label_space)-1, "%s / %s", s1, s2);
+		}
         g_free(s1);
         g_free(s2);
         g_free(s3);
@@ -387,10 +395,16 @@ static void get_fs_info_cb (GObject *src, GAsyncResult *res, gpointer data)
 {
 	GFileInfo *fi = g_file_query_filesystem_info_finish(G_FILE(src), res, NULL);
 	if (fi) {
-        print_fileinfo(fi);
+        print_fileinfo(fi, (gchar*) data);
 		//g_object_unref (fi);
 		set_gui_action(ACTION_FREESPACE, false);
 	}
+}
+static void query_fs_async(const gchar *path, gpointer data)
+{
+	GFile *f = g_file_new_for_path(path);
+	g_file_query_filesystem_info_async (f,"filesystem::*", 0, NULL, get_fs_info_cb, (gpointer)path);
+	g_object_unref(f);
 }
 static gboolean gfileinfo_cb (gpointer data)
 {
@@ -398,15 +412,10 @@ static gboolean gfileinfo_cb (gpointer data)
 	printf("gfileinfo_cb %d\n", from);
 	if(from==0) { // Global
 		if(g_prefs && g_prefs->music_dir) {
-			GFile *f = g_file_new_for_path(g_prefs->music_dir);
-			g_file_query_filesystem_info_async (f,"filesystem::*", 0, NULL, get_fs_info_cb, data);
-			g_object_unref(f);
+			query_fs_async(g_prefs->music_dir, data);
 		}
 	} else {
-		const gchar *d = GET_PREF_TEXT(WDG_MUSIC_DIR);
-		GFile *f = g_file_new_for_path(d);
-		g_file_query_filesystem_info_async (f,"filesystem::*", 0, NULL, get_fs_info_cb, data);
-		g_object_unref(f);
+			query_fs_async(GET_PREF_TEXT(WDG_MUSIC_DIR), data);
 	}
 	return FALSE;
 }
@@ -1963,6 +1972,7 @@ static void on_folder_clicked(GtkButton *button, gpointer user_data)
 									NULL);
 
 	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dlg);
+	// BUG : TODO set the current path the WDG_MUSIC_DIR
 	gtk_file_chooser_set_current_folder(chooser, g_prefs->music_dir);
 	if (gtk_dialog_run(GTK_DIALOG(chooser)) == GTK_RESPONSE_ACCEPT) {
 		gchar *folder_path = gtk_file_chooser_get_filename(chooser);
@@ -4935,7 +4945,10 @@ static gboolean cb_gui_update(gpointer data)
 			break;
 
 		case ACTION_FREESPACE:
-			gtk_label_set_text(GTK_LABEL(LKP_PREF(WDG_LBL_FREESPACE)), g_data->label_space);
+			{
+				GtkLabel *lbl = GTK_LABEL(LKP_PREF(WDG_LBL_FREESPACE));
+				gtk_label_set_markup(lbl, g_data->label_space);
+			}
 			g_data->action = NO_ACTION;
 			break;
 	}

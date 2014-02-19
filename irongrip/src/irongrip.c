@@ -32,6 +32,7 @@
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
 #endif
+#include <assert.h>
 #include <cddb/cddb.h>
 #include <ctype.h>
 #include <dlfcn.h>
@@ -45,6 +46,7 @@
 #include <limits.h>
 #include <linux/cdrom.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -116,6 +118,7 @@
 #define WDG_ABOUT "about"
 #define WDG_DISC "disc"
 #define WDG_CDDB "lookup"
+#define WDG_SEEK "seek"
 #define WDG_MAIN "main"
 #define WDG_PREFS "preferences"
 #define WDG_RIP "rip_button"
@@ -254,6 +257,8 @@ typedef struct _prefs {
     int main_window_height;
     int eject_on_done;
     int always_overwrite;
+    int use_notify;
+    int mb_lookup;
     int rip_fast;
     int do_cddb_updates;
     int use_proxy;
@@ -325,6 +330,7 @@ typedef struct _shared {
 	guint64 free_space;
 	guint64 total_space;
 	gchar label_space[128];
+	gchar disc_id[64];
 } shared;
 
 typedef struct _cdrom {
@@ -332,6 +338,64 @@ typedef struct _cdrom {
 	gchar *device;
 	int fd;
 } s_drive;
+
+typedef struct {
+	char *artistName;
+	char *artistNameSort;
+	uint8_t artistIdCount;
+	char **artistId;
+} mbartistcredit_t;
+
+typedef struct {
+	char *trackName;
+	char *trackId;
+	mbartistcredit_t trackArtist;
+} mbtrack_t;
+
+/** Representation of a MusicBrainz medium.
+ * This gives information about some specific CD.
+ */
+typedef struct {
+	/** Sequence number of the disc in the release.
+     * For single CD releases, this will always be 1, otherwise it will be
+     * the number of the CD in the released set.
+     */
+	uint16_t discNum;
+
+	/** Title of the disc if there is one. */
+	char *title;
+
+	/** Count of tracks in the medium. */
+	uint16_t trackCount;
+
+	/** Array of the track information. */
+	mbtrack_t *track;
+
+} mbmedium_t;
+
+typedef struct {
+	char *releaseGroupId;
+	char *releaseId;
+	char *releaseDate;
+	char *asin;
+	char *albumTitle;
+	char *releaseType;
+	mbartistcredit_t albumArtist;
+
+	/** Total mediums in the release i.e. number of CDs for multidisc releases. */
+	uint16_t discTotal;
+
+	mbmedium_t medium;
+} mbrelease_t;
+
+typedef struct {
+	uint16_t releaseCount;
+	mbrelease_t *release;
+} mbresult_t;
+
+#define M_ArrayElem(a) (sizeof(a) / sizeof(a[1]))
+
+
 
 // Global objects
 static GtkWidget *win_main = NULL;
@@ -367,29 +431,80 @@ static void set_widgets_from_prefs(prefs *p);
 static void sigchld();
 static void set_gui_action(int action, gboolean wait);
 static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name);
+static bool musicbrainz_lookup(const char *discId, mbresult_t * res);
+static void musicbrainz_print(const mbresult_t * res, char *path);
+static void fetch_image(const mbresult_t *res, char *path);
+static void mb_free(mbresult_t * res);
+
+/** Compare two strings, either of which maybe NULL.  */
+static int strcheck(const char *a, const char *b)
+{
+	if (a == NULL && b == NULL) {
+		return 0;
+	} else if (a == NULL) {
+		return -1;
+	} else if (b == NULL) {
+		return 1;
+	} else {
+		return strcmp(a, b);
+	}
+}
+
+
+
+
+
+static gboolean stat_file(const char *path) {
+	struct stat sts;
+	if(stat(path,&sts)!=0) {
+		printf("Cannot stat file [%s], error=[%s]", path, strerror(errno));
+		return FALSE;
+	}
+	gchar smode[11];
+	memset(smode,0,sizeof(smode));
+	memset(smode,'-',sizeof(smode)-1);
+	if(sts.st_mode & S_IFLNK) smode[0] = 'l';
+	if(sts.st_mode & S_IFSOCK) smode[0] = 's';
+	if(sts.st_mode & S_IFBLK) smode[0] = 'b';
+	if(sts.st_mode & S_IFCHR) smode[0] = 'c';
+	if(sts.st_mode & S_IFDIR) smode[0] = 'd';
+	if(sts.st_mode & S_IRUSR) smode[1] = 'r'; /* 3 bits for user  */
+	if(sts.st_mode & S_IWUSR) smode[2] = 'w';
+	if(sts.st_mode & S_IXUSR) smode[3] = 'x';
+	if(sts.st_mode & S_IRGRP) smode[4] = 'r'; /* 3 bits for group */
+	if(sts.st_mode & S_IWGRP) smode[5] = 'w';
+	if(sts.st_mode & S_IXGRP) smode[6] = 'x';
+	if(sts.st_mode & S_IROTH) smode[7] = 'r'; /* 3 bits for other */
+	if(sts.st_mode & S_IWOTH) smode[8] = 'w';
+	if(sts.st_mode & S_IXOTH) smode[9] = 'x';
+	// struct passwd *pwd = getpwuid(sts.st_uid);
+	// printf("MODE = [%d][%s][%s] %s\n",sts.st_mode, smode, pwd->pw_name, path);
+	return TRUE;
+}
 
 static void print_fileinfo(GFileInfo *fi, const gchar *path) {
-        guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
-		g_data->free_space = n;
-        gchar *s1 = g_format_size_for_display(n);
-        n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
-		g_data->total_space = n;
-        gchar *s2 = g_format_size_for_display(n);
-        gchar *s3 = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
-        gboolean readonly = g_file_info_get_attribute_boolean(fi, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY);
-		if(!readonly) {
-			printf("FILE = (%s)\n", path);
-			readonly =  g_file_info_get_attribute_boolean(fi, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE);
-		}
-		//snprintf(g_data->label_space, sizeof(g_data->label_space)-1, "%s / %s (%s)", s1, s2, s3);
-		if(readonly) {
-			snprintf(g_data->label_space, sizeof(g_data->label_space)-1, "%s / %s (<span foreground=\"red\" weight=\"bold\">readonly</span>)", s1, s2);
-		} else {
-			snprintf(g_data->label_space, sizeof(g_data->label_space)-1, "%s / %s", s1, s2);
-		}
-        g_free(s1);
-        g_free(s2);
-        g_free(s3);
+	guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+	g_data->free_space = n;
+	gchar *s1 = g_format_size_for_display(n);
+	n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+	g_data->total_space = n;
+	gchar *s2 = g_format_size_for_display(n);
+	gchar *s3 = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+	gboolean readonly = g_file_info_get_attribute_boolean(fi, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY);
+	if(!readonly && access(path, W_OK) != 0) {
+		readonly = true;
+	}
+	stat_file(path);
+	size_t lz = sizeof(g_data->label_space);
+	char *p = g_data->label_space;
+	int w = snprintf(p, lz, "%s / %s", s1, s2);
+	if(readonly && w < lz-1) {
+		w+=snprintf(p+w, lz-w, " (<span foreground=\"red\" weight=\"bold\">read-only</span>)");
+	}
+	// printf("lz=%d w=%d p=[%s]\n",lz,w,p);
+	g_free(s1);
+	g_free(s2);
+	g_free(s3);
 }
 static void get_fs_info_cb (GObject *src, GAsyncResult *res, gpointer data)
 {
@@ -409,13 +524,11 @@ static void query_fs_async(const gchar *path, gpointer data)
 static gboolean gfileinfo_cb (gpointer data)
 {
 	int from = GPOINTER_TO_INT(data);
-	printf("gfileinfo_cb %d\n", from);
+	// printf("gfileinfo_cb %d\n", from);
 	if(from==0) { // Global
-		if(g_prefs && g_prefs->music_dir) {
-			query_fs_async(g_prefs->music_dir, data);
-		}
+		if(g_prefs && g_prefs->music_dir) query_fs_async(g_prefs->music_dir, data);
 	} else {
-			query_fs_async(GET_PREF_TEXT(WDG_MUSIC_DIR), data);
+		query_fs_async(GET_PREF_TEXT(WDG_MUSIC_DIR), data);
 	}
 	return FALSE;
 }
@@ -1298,7 +1411,7 @@ static bool check_disc()
 											GINT_TO_POINTER(fd), TRUE, NULL);
 		while (g_atomic_int_get(&g_data->ioctl_thread_running) != 0) {
 			GTK_REFRESH;
-			Sleep(200);
+			Sleep(100);
 		}
 		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 		close(fd);
@@ -1588,7 +1701,7 @@ static cddb_disc_t *read_disc(char *cdrom)
 	}
 	printf("] ");*/
 	gchar *b64 =g_base64_encode(buffer, digest_len);
-	//printf("BASE64 = %s\n", b64);
+	//printf("BASE64 = %s (len=%d)\n", b64, strlen(b64));
 	gchar *p = b64;
 	while(*p) {
 		if(*p == '+') *p = '.';
@@ -1596,7 +1709,7 @@ static cddb_disc_t *read_disc(char *cdrom)
 		if(*p == '=') *p = '-';
 		p++;
 	}
-	printf("Musicbrainz = http://musicbrainz.org/ws/2/discid/%s\n", b64);
+	strcpy(g_data->disc_id, b64);
 	g_free(b64);
 end:
 	close(fd);
@@ -1953,6 +2066,14 @@ static void on_s_drive_changed(GtkComboBox *combo, gpointer user_data)
 	}
 }
 
+static void enable_widget(char *name) {
+	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
+}
+
+static void disable_widget(char *name) {
+	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
+}
+
 static void on_pick_disc_changed(GtkComboBox *combobox, gpointer user_data)
 {
 	cddb_disc_t *disc = g_list_nth_data(g_data->disc_matches,
@@ -1995,6 +2116,10 @@ static void on_prefs_response(GtkDialog *dialog, gint response, gpointer data)
 		if (!prefs_are_valid()) return;
 		get_prefs_from_widgets(g_prefs);
 		save_prefs(g_prefs);
+		if(g_prefs->mb_lookup)
+			enable_widget(WDG_SEEK);
+		else
+			disable_widget(WDG_SEEK);
 	}
 	gtk_widget_hide(GTK_WIDGET(dialog));
 }
@@ -2019,6 +2144,20 @@ static void on_press_f2(void)
 static void on_lookup_clicked(GtkToolButton *button, gpointer user_data)
 {
 	refresh(1);
+}
+
+static void on_seek_clicked(GtkToolButton *button, gpointer user_data)
+{
+	if(g_data->disc_id[0] == '\0') return;
+	if(!g_prefs->music_dir) return;
+	if(!is_directory(g_prefs->music_dir)) return;
+
+	mbresult_t res;
+	if(musicbrainz_lookup(g_data->disc_id, &res)) {
+		musicbrainz_print(&res, g_prefs->music_dir);
+		fetch_image(&res, g_prefs->music_dir);
+	}
+	mb_free(&res);
 }
 
 static bool lookup_cdparanoia()
@@ -2407,15 +2546,28 @@ static GtkWidget *create_main(void)
 	gtk_toolbar_set_style(GTK_TOOLBAR(toolbar), GTK_TOOLBAR_BOTH_HORIZ);
 
 	GtkIconSize icon_size = gtk_toolbar_get_icon_size(GTK_TOOLBAR(toolbar));
+
 	GtkWidget *icon = gtk_image_new_from_stock(GTK_STOCK_REFRESH, icon_size);
 	gtk_widget_show(icon);
 	GtkWidget *lookup = (pWdg) gtk_tool_button_new(icon, _("CDDB Lookup"));
 	GtkTooltips *tip = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tip, lookup,
-		_("Look up into the CDDB for information about this audio disc"), NULL);
+		_("Look up into the CDDB for information about this audio disc."), NULL);
 	gtk_widget_show(lookup);
 	gtk_container_add(GTK_CONTAINER(toolbar), lookup);
 	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(lookup), TRUE);
+
+	GtkWidget *seek_icon = gtk_image_new_from_stock(GTK_STOCK_EXECUTE, icon_size);
+	gtk_widget_show(seek_icon);
+	GtkWidget *seek_button = (pWdg) gtk_tool_button_new(seek_icon, _("IronSeek"));
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, seek_button,
+		_("Look up into MusicBrainz and Amazon for metadata and covers."), NULL);
+	gtk_widget_show(seek_button);
+	gtk_container_add(GTK_CONTAINER(toolbar), (pWdg) seek_button);
+	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(seek_button), TRUE);
+	if(!g_prefs->mb_lookup)
+		gtk_widget_set_sensitive(seek_button, FALSE);
 
 	GtkWidget *pref= (pWdg) gtk_tool_button_new_from_stock(GTK_STOCK_PREFERENCES);
 	gtk_widget_show(pref);
@@ -2600,6 +2752,7 @@ static GtkWidget *create_main(void)
 	CONNECT_SIGNAL(tracklist, "button-press-event", on_tracklist_clicked);
 	CONNECT_SIGNAL(col, "clicked", on_ripcol_clicked);
 	CONNECT_SIGNAL(lookup, "clicked", on_lookup_clicked);
+	CONNECT_SIGNAL(seek_button, "clicked", on_seek_clicked);
 	CONNECT_SIGNAL(pref, "clicked", on_preferences_clicked);
 	CONNECT_SIGNAL(about, "clicked", on_about_clicked);
 	CONNECT_SIGNAL(album_artist, "focus_out_event", on_album_artist_focus_out);
@@ -2643,6 +2796,7 @@ static GtkWidget *create_main(void)
 	HOOKUP(main_win, album_year, WDG_ALBUM_YEAR);
 	HOOKUP(main_win, disc, WDG_DISC);
 	HOOKUP(main_win, lookup, WDG_CDDB);
+	HOOKUP(main_win, seek_button, WDG_SEEK);
 	HOOKUP(main_win, pick_disc, WDG_PICK_DISC);
 	HOOKUP(main_win, pref, WDG_PREFS);
 	HOOKUP(main_win, rip_button, WDG_RIP);
@@ -2723,12 +2877,26 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
 													_("Create M3U playlist"));
 	gtk_widget_show(make_m3u);
-	BOXPACK(vbox, make_m3u, FALSE, FALSE, 8);
+	BOXPACK(vbox, make_m3u, FALSE, FALSE, 6);
 
 	GtkWidget *always_overwrite = gtk_check_button_new_with_mnemonic(
 										_("Always overwrite output files"));
 	gtk_widget_show(always_overwrite);
-	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 4);
+	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 2);
+
+	GtkWidget *use_notify = gtk_check_button_new_with_mnemonic(
+					_("Display desktop notifications"));
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, use_notify, _("This feature requires 'libnotify'."), NULL);
+	gtk_widget_show(use_notify);
+	BOXPACK(vbox, use_notify, FALSE, FALSE, 2);
+
+	GtkWidget *mb_lookup = gtk_check_button_new_with_mnemonic(
+				_("Enable IronSeek engine (very experimental!)"));
+	tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, mb_lookup, _("Look up into MusicBrainz for metadata and covers."), NULL);
+	gtk_widget_show(mb_lookup);
+	BOXPACK(vbox, mb_lookup, FALSE, FALSE, 2);
 
 	label = gtk_label_new(_("General"));
 	gtk_widget_show(label);
@@ -3214,6 +3382,8 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
 	HOOKUP(prefs, eject_on_done, "eject_on_done");
 	HOOKUP(prefs, always_overwrite, "always_overwrite");
+	HOOKUP(prefs, use_notify, "use_notify");
+	HOOKUP(prefs, mb_lookup, "mb_lookup");
 	HOOKUP(prefs, rip_fast, "rip_fast");
 	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
@@ -3241,14 +3411,6 @@ static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
 	return progress;
 }
 
-static void enable_widget(char *name) {
-	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
-}
-
-static void disable_widget(char *name) {
-	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
-}
-
 static void disable_all_main_widgets(void)
 {
 	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
@@ -3257,6 +3419,7 @@ static void disable_all_main_widgets(void)
 	disable_widget(WDG_LBL_ALBUMTITLE);
 	disable_widget(WDG_LBL_ARTIST);
 	disable_widget(WDG_CDDB);
+	disable_widget(WDG_SEEK);
 	disable_widget(WDG_PREFS);
 	disable_widget(WDG_RIP);
 	disable_widget(WDG_SINGLE_ARTIST);
@@ -3276,6 +3439,7 @@ static void disable_lookup_widgets(void)
 	disable_widget(WDG_LBL_ALBUMTITLE);
 	disable_widget(WDG_LBL_ARTIST);
 	disable_widget(WDG_CDDB);
+	disable_widget(WDG_SEEK);
 	disable_widget(WDG_RIP);
 	disable_widget(WDG_SINGLE_ARTIST);
 	disable_widget(WDG_SINGLE_GENRE);
@@ -3294,6 +3458,7 @@ static void enable_all_main_widgets(void)
 	enable_widget(WDG_LBL_ALBUMTITLE);
 	enable_widget(WDG_LBL_ARTIST);
 	enable_widget(WDG_CDDB);
+	if(g_prefs->mb_lookup) enable_widget(WDG_SEEK);
 	enable_widget(WDG_PREFS);
 	enable_widget(WDG_RIP);
 	enable_widget(WDG_SINGLE_ARTIST);
@@ -3337,17 +3502,29 @@ static void show_completed_dialog()
 #define CREATOK " created successfully"
 #define CREATKO "There was an error creating "
 
-	int numOk = g_data->numCdparanoiaOk
-				+ g_data->numLameOk + g_data->numFlacOk;
+	int numOk = g_data->numCdparanoiaOk + g_data->numLameOk
+					+ g_data->numOggOk + g_data->numFlacOk;
 
-	int numFailed = g_data->numCdparanoiaFailed
-				+ g_data->numLameFailed + g_data->numFlacFailed;
+	int numFailed = g_data->numCdparanoiaFailed + g_data->numLameFailed
+					+ g_data->numOggFailed + g_data->numFlacFailed;
 
     if(numFailed > 0) {
+		if(g_prefs->use_notify) {
+			gchar *m = g_strdup_printf(ngettext(CREATKO "%d file", CREATKO "%d files", numFailed), numFailed);
+			notify(m);
+			g_free(m);
+		}
 		DIALOG_WARNING_CLOSE(
 				ngettext(CREATKO "%d file", CREATKO "%d files", numFailed),
 				numFailed);
 	} else {
+		if(g_prefs->use_notify) {
+			gchar *m = g_strdup_printf(
+						ngettext("%d file" CREATOK, "%d files" CREATOK, numOk),
+						numOk);
+			notify(m);
+			g_free(m);
+		}
 		DIALOG_INFO_CLOSE(
 				ngettext("%d file" CREATOK, "%d files" CREATOK, numOk),
 				numOk);
@@ -3376,6 +3553,8 @@ static prefs *get_default_prefs()
 	}
 	p->eject_on_done = 0;
 	p->always_overwrite = 0;
+	p->use_notify = 0;
+	p->mb_lookup = 0;
 	p->rip_fast = 0;
 	p->main_window_height = 380;
 	p->main_window_width = 520;
@@ -3448,6 +3627,8 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle("do_log", p->do_log);
 	set_pref_toggle("eject_on_done", p->eject_on_done);
 	set_pref_toggle("always_overwrite", p->always_overwrite);
+	set_pref_toggle("use_notify", p->use_notify);
+	set_pref_toggle("mb_lookup", p->mb_lookup);
 	set_pref_toggle("rip_fast", p->rip_fast);
 	set_pref_toggle("make_playlist", p->make_playlist);
 	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
@@ -3549,6 +3730,8 @@ static void get_prefs_from_widgets(prefs *p)
 	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
 	p->always_overwrite = get_pref_toggle("always_overwrite");
+	p->use_notify = get_pref_toggle("use_notify");
+	p->mb_lookup = get_pref_toggle("mb_lookup");
 	p->rip_fast = get_pref_toggle("rip_fast");
 	p->do_cddb_updates = get_pref_toggle("do_cddb_updates");
 	p->use_proxy = get_pref_toggle("use_proxy");
@@ -3614,6 +3797,8 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
 	fprintf(fd, "EJECT=%d\n", p->eject_on_done);
 	fprintf(fd, "OVERWRITE=%d\n", p->always_overwrite);
+	fprintf(fd, "NOTIFY=%d\n", p->use_notify);
+	fprintf(fd, "SEEK_MUSICBRAINZ=%d\n", p->mb_lookup);
 	fprintf(fd, "CDPARANOIA_ZMODE=%d\n", p->rip_fast);
 	fprintf(fd, "CDDB_UPDATE=%d\n", p->do_cddb_updates);
 	fprintf(fd, "USE_PROXY=%d\n", p->use_proxy);
@@ -3697,6 +3882,8 @@ static void load_prefs()
 	get_field_as_szentry(s, file, "LOG_FILE", p->log_file);
 	get_field_as_long(s,file,"EJECT", &(p->eject_on_done));
 	get_field_as_long(s,file,"OVERWRITE", &(p->always_overwrite));
+	get_field_as_long(s,file,"NOTIFY", &(p->use_notify));
+	get_field_as_long(s,file,"SEEK_MUSICBRAINZ", &(p->mb_lookup));
 	get_field_as_long(s,file,"CDPARANOIA_ZMODE", &(p->rip_fast));
 	get_field_as_long(s,file,"CDDB_UPDATE", &(p->do_cddb_updates));
 	get_field_as_long(s,file,"USE_PROXY",&(p->use_proxy));
@@ -3728,13 +3915,12 @@ static void load_prefs()
 // it will make sure it always points to a nice directory
 static char *prefs_get_music_dir(prefs *p)
 {
-	struct stat s;
-	if (stat(p->music_dir, &s) == 0) {
+	if(is_directory(p->music_dir)) {
 		return p->music_dir;
 	}
 	gchar *newdir = get_default_music_dir();
 	if(strcmp(newdir,p->music_dir)) {
-		DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\n"
+		DIALOG_ERROR_OK("The music directory '%s' does not exist (or the path does not lead to a directory).\n\n"
 				"The music directory will be reset to '%s'.", p->music_dir, newdir);
 		szcopy(p->music_dir, newdir);
 	}
@@ -3943,6 +4129,8 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 	// note: only use the "[wrote]" numbers
 	char buf[256];
 	int size = 0;
+	int start = 0;
+	int end = 0;
 	do {
 		int pos = -1;
 		do {
@@ -3970,10 +4158,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 			}
 		} while ((buf[pos] != '\n') && (size > 0) && (pos < 256));
 		buf[pos] = '\0';
-		// printf("%s\n", buf);
-		int start = 0;
-		int end = 0;
-		int sector = 0;
+
 		if ((buf[0] == 'R') && (buf[1] == 'i')) {
 			sscanf(buf, "Ripping from sector %d", &start);
 		} else if (buf[0] == '\t') {
@@ -3981,6 +4166,7 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 		} else if (buf[0] == '#') {
 			int code = 0;
 			char type[200];
+			int sector = 0;
 			sscanf(buf, "##: %d %s @ %d", &code, type, &sector);
 			sector /= 1176;
 			if (strncmp("[wrote]", type, 7) == 0) {
@@ -4118,8 +4304,12 @@ static void reset_counters()
 	g_data->encode_tracks_completed = 0;
 	g_data->numCdparanoiaFailed = 0;
 	g_data->numLameFailed = 0;
+	g_data->numOggFailed = 0;
+	g_data->numFlacFailed = 0;
 	g_data->numCdparanoiaOk = 0;
 	g_data->numLameOk = 0;
+	g_data->numOggOk = 0;
+	g_data->numFlacOk = 0;
 	g_data->rip_percent = 0.0;
 }
 
@@ -4739,7 +4929,6 @@ static gpointer track_thread(gpointer data)
 		started = true;
 		torip = g_data->tracks_to_rip;
 		completed = g_data->rip_tracks_completed;
-
 		g_data->prip = (completed + g_data->rip_percent) / torip;
 		snprintf(g_data->srip, 32, "%02.2f%% (%d/%d)", (g_data->prip * 100),
 				(completed < torip) ? (completed + 1) : torip, torip);
@@ -4956,6 +5145,1019 @@ static gboolean cb_gui_update(gpointer data)
 unlock:
 	g_mutex_unlock(g_data->monolock);
 	return TRUE;
+}
+
+#ifdef NDEBUG
+  #define dprintf(s)  printf("%s:%d: %s: %s\n",__FILE__,__LINE__,__func__,s)
+#else
+  #define dprintf(s)
+#endif
+
+#define M_ArrayLen(a) (sizeof(a) / sizeof(a[0]))
+
+typedef struct xmlnode *xmlnode_t;
+bool        XmlParseFd(struct xmlnode **n,int fd);
+const char *XmlParseStr(struct xmlnode **n,const char *s);
+const char *XmlGetTag(struct xmlnode *n);
+const char *XmlGetAttribute(struct xmlnode *n, const char *attr);
+const char *XmlGetContent(struct xmlnode *n);
+int         XmlTagStrcmp(struct xmlnode *n, const char *str);
+struct xmlnode *XmlFindSubNode(struct xmlnode *n, const char *tag);
+struct xmlnode *XmlFindSubNodeFree(struct xmlnode *n, const char *tag);
+void XmlDestroy(struct xmlnode **n);
+
+struct xmlnode {
+    char *tag;
+    char *content;
+    char *attributes;
+    void    *freeList[16];
+    uint32_t freeListLen;
+    bool        converted;
+    int         fd;
+    const char *array;
+};
+
+/** Skip space characters in the passed string.
+ *
+ * \returns Pointer to the first non-space character in \a s, which maybe a nul.
+ */
+static const char *skipSpace(const char *s)
+{
+	while (isspace(*s)) {
+		s++;
+	}
+	return s;
+}
+
+static void convert(char *s)
+{
+	char *sIn = s;
+	char *sOut = s;
+
+	do {
+		while (*sIn != '&' && *sIn != '\0') {
+			*sOut = *sIn;
+			sIn++;
+			sOut++;
+		}
+		if (*sIn == '&') {
+			static const struct {
+				const char *token;
+				const uint8_t len;
+				const char *substitution;
+			} replacements[] = {
+				{
+				"&quot;", 6, "\""}, {
+				"&apos;", 6, "'"}, {
+				"&amp;", 5, "&"}, {
+				"&lt;", 4, "<"}, {
+				"&gt;", 4, ">"}
+			};
+
+			uint8_t t;
+			for (t = 0; t < M_ArrayLen(replacements); t++) {
+				if (strncasecmp(sIn, replacements[t].token, replacements[t].len) == 0) {
+					break;
+				}
+			}
+			if (t < M_ArrayLen(replacements)) {
+				sIn += replacements[t].len;
+				strcpy(sOut, replacements[t].substitution);
+				sOut += strlen(replacements[t].substitution);
+			} else {
+				*sOut = *sIn;
+				sIn++;
+				sOut++;
+			}
+		}
+	}
+	while (*sIn != '\0');
+
+	*sOut = '\0';
+}
+
+/** Get another character from wherever we are reading.
+ */
+static int getnextchar(struct xmlnode *n, char *c)
+{
+	/* Reading from fd */
+	if (n->fd != -1 && n->array == NULL)
+		return read(n->fd, c, sizeof(char));
+
+	/* Reading from array */
+	if (n->fd == -1 && n->array != NULL) {
+		*c = *(n->array);
+		n->array++;
+		return (*c == '\0') ? 0 : 1;
+	}
+	return 0;
+}
+
+/** Parse to find a tag enclosure. */
+static bool Parse(struct xmlnode *n)
+{
+	char c;
+	int r, l, m;
+	int tagcount;
+
+	/* Search for a < */
+	do {
+		r = getnextchar(n, &c);
+	}
+	while (r == 1 && c != '<');
+
+	if (c != '<') {
+		return false;
+	}
+
+	n->tag = g_malloc0(l = 64);
+	m = 0;
+
+	/* Read until a > */
+	do {
+		r = getnextchar(n, &n->tag[m++]);
+
+		/* Skip space at the start of a tag eg. < tag> */
+		if (m == 1 && isspace(n->tag[0]))
+			m = 0;
+
+		if (m == l)
+			n->tag = g_realloc(n->tag, l += 256);
+
+	}
+	while (r == 1 && n->tag[m - 1] != '>');
+
+	if (n->tag[m - 1] != '>') {
+		dprintf("Failed to find closing '>'");
+		g_free(n->tag);
+		return false;
+	}
+	/* Null terminate the tag */
+	n->tag[m - 1] = '\0';
+
+	/* Check if it is a <?...> or <!...> tag */
+	if (*n->tag == '?' || *n->tag == '!') {
+		dprintf("Found '<? ...>' or '<! ...>' tag");
+		dprintf(n->tag);
+		n->content = NULL;
+		return true;
+	}
+	/* Check if it is a < /> tag */
+	if (m >= 2 && n->tag[m - 2] == '/') {
+		n->tag[m - 2] = '\0';
+		dprintf("Found '<.../>' tag");
+		dprintf(n->tag);
+		n->content = NULL;
+		return true;
+	}
+	/* May need to truncate tag to remove attributes */
+	r = 0;
+	do {
+		r++;
+	}
+	while (n->tag[r] != '\0' && !isspace(n->tag[r]));
+	n->tag[r] = '\0';
+	n->attributes = &n->tag[r + 1];
+
+	dprintf("Found tag:");
+	dprintf(n->tag);
+
+	n->content = g_malloc0(l = 256);
+	tagcount = 1;
+	m = 0;
+
+	/* Now read until the closing tag */
+	do {
+		r = getnextchar(n, &n->content[m++]);
+
+		if (m > 1) {
+			/* Is there a new tag opening? */
+			if (n->content[m - 2] == '<') {
+				/* Is the tag opening or closing */
+				if (n->content[m - 1] == '/')
+					tagcount--;
+				else
+					tagcount++;
+			}
+			/* Catch any <blah/> style tags */
+			if (n->content[m - 2] == '/' && n->content[m - 1] == '>') {
+				tagcount--;
+			}
+		}
+		if (m == l)
+			n->content = g_realloc(n->content, l += 256);
+
+	}
+	while (r == 1 && tagcount > 0);
+
+	if (r != 1) {
+		dprintf("Failed to find closing tag");
+		dprintf(n->tag);
+		g_free(n->tag);
+		g_free(n->content);
+		return false;
+	}
+	/* Null terminate the content */
+	n->content[m - 2] = '\0';
+
+	return true;
+}
+
+/** Return some attribute value for a node. */
+const char *XmlGetAttribute(struct xmlnode *n, const char *attr)
+{
+	const char *s = n->attributes;
+	const uint32_t attrLen = strlen(attr);
+
+	while ((s = strstr(s, attr)) != NULL) {
+		const char *preS = s - 1;
+		const char *postS = s + attrLen;
+
+		/* Check if the attribute was found in isolation
+		 *  i.e. not part of another attribute name.
+		 */
+		if ((s == n->attributes || isspace(*preS)) && (*postS == '=' || isspace(*postS))) {
+			postS = skipSpace(postS);
+
+			if (*postS == '=') {
+				postS++;
+				postS = skipSpace(postS);
+				if (*postS == '"') {
+					char *c, *r = g_strdup(postS + 1);
+
+					if ((c = strchr(r, '"')) != NULL)
+						*c = '\0';
+
+					n->freeList[n->freeListLen++] = r;
+					return r;
+				}
+			}
+		}
+		/* Skip the match */
+		s++;
+	}
+	return NULL;
+}
+
+/** Return the tag.
+ */
+const char *XmlGetTag(struct xmlnode *n)
+{
+	return n->tag;
+}
+
+/** Compare the tag name with some string.
+ */
+int XmlTagStrcmp(struct xmlnode *n, const char *str)
+{
+	return strcmp(n->tag, str);
+}
+
+/** Get the content.
+ */
+const char *XmlGetContent(struct xmlnode *n)
+{
+	if (!n->converted) {
+		convert(n->content);
+		n->converted = true;
+	}
+	return n->content;
+}
+
+/** Free a node and its storage.
+ * \param[in,out] n  Pointer to node pointer to be freed.  If *n == NULL,
+ *                    no action is taken.  *n is always set to NULL when
+ *                    returning.
+ */
+void XmlDestroy(struct xmlnode **n)
+{
+	struct xmlnode *nn = *n;
+
+	if (nn) {
+		if (nn->tag) {
+			g_free(nn->tag);
+		}
+		if (nn->content) {
+			g_free(nn->content);
+		}
+		while (nn->freeListLen-- > 0) {
+			g_free(nn->freeList[nn->freeListLen]);
+		}
+		g_free(nn);
+		*n = NULL;
+	}
+}
+
+/** Parse some XML from a file descriptor.
+ * \param[in,out] n  Pointer to a node pointer. If *n != NULL, it will be freed.
+ */
+bool XmlParseFd(struct xmlnode **n, int fd)
+{
+	XmlDestroy(n);
+
+	*n = g_malloc0(sizeof(struct xmlnode));
+	(*n)->fd = fd;
+
+	if (!Parse(*n)) {
+		g_free(*n);
+		*n = NULL;
+		return false;
+	}
+	return true;
+}
+
+/** Parse from a string buffer.
+ * Parse some XML in a string, returning the position in the string reached,
+ * or NULL if the string was exhausted and no node was found.
+ * \param[in,out] n  Pointer to a node pointer. If *n != NULL, it will be freed.
+ */
+const char *XmlParseStr(struct xmlnode **n, const char *s)
+{
+	XmlDestroy(n);
+
+	if (s == NULL) {
+		return NULL;
+	}
+	*n = g_malloc0(sizeof(struct xmlnode));
+	(*n)->fd = -1;
+	(*n)->array = s;
+	if (!Parse(*n)) {
+		g_free(*n);
+		*n = NULL;
+		return NULL;
+	} else {
+		return (*n)->array;
+	}
+}
+
+/** Find a sub-node whose name matches the passed tag. */
+struct xmlnode *XmlFindSubNode(struct xmlnode *n, const char *tag)
+{
+	if (n == NULL) {
+		return NULL;
+	}
+	const char *s = XmlGetContent(n);
+	struct xmlnode *r = NULL;
+	do {
+		XmlDestroy(&r);
+		s = XmlParseStr(&r, s);
+	}
+	while (r && XmlTagStrcmp(r, tag) != 0);
+
+	return r;
+}
+
+/** Same as XmlFindSubNode(), but frees the past node before returning.
+ */
+struct xmlnode *XmlFindSubNodeFree(struct xmlnode *n, const char *tag)
+{
+	struct xmlnode *r = XmlFindSubNode(n, tag);
+	XmlDestroy(&n);
+	return r;
+}
+
+struct cfetch {
+    char    *data;
+    size_t   size;
+};
+
+/** Callback for fetching URLs via CURL.  */
+static size_t curlCallback(void *ptr, size_t size, size_t nmemb, void *param)
+{
+    struct cfetch *mbr = (struct cfetch *)param;
+    size_t realsize = size * nmemb;
+    mbr->data = g_realloc(mbr->data, mbr->size + realsize + 1);
+    memcpy(&mbr->data[mbr->size], ptr, realsize);
+    mbr->size += realsize;
+    mbr->data[mbr->size] = '\0';
+    return realsize;
+}
+
+#define FMAP(tdef,fname,fptr) \
+	tdef fptr = (tdef)dlsym(h,fname);\
+	if(h == NULL) {\
+		printf("Library function not found: %s\n",fname);\
+		goto cleanup;\
+	}
+
+static void* get_curl_lib()
+{
+	char *libs[] = { "libcurl.so.4", "libcurl.so", "libcurl-gnutls.so.4",
+						"libcurl.so.3", NULL };
+	static void *h = NULL;
+
+	if(h) return h;
+	char **p = libs;
+	while(*p) {
+		h = dlopen(*p, RTLD_LAZY);
+		if(h) {
+			// printf("Loaded %s\n", *p);
+			return h;
+		}
+		p++;
+	}
+	printf("Failed to open Curl library.\n");
+	return NULL;
+}
+
+/** Fetch some URL and return the contents in a memory buffer.
+ * \param[in,out] size    Pointer to fill with the length of returned data.
+ * \param[in]     urlFmt  The URL, or a printf-style format string for the URL.
+ * \returns A pointer to the read data, or NULL if the fetch failed in any way.
+*/
+static void *CurlFetch(size_t *size, const char *urlFmt, ...)
+{
+	void *h = get_curl_lib();
+	if(!h) return NULL;
+
+	typedef void*		(*ce_init_t)(void);
+	typedef int			(*ce_setopt_t)(void *, int, ...);
+	typedef int			(*ce_perform_t)(void *);
+	typedef const char* (*ce_strerror_t)(int);
+	typedef void		(*ce_cleanup_t)(void *);
+
+	FMAP(ce_init_t,"curl_easy_init",ce_init);
+	FMAP(ce_setopt_t,"curl_easy_setopt",ce_setopt);
+	FMAP(ce_perform_t,"curl_easy_perform",ce_perform);
+	FMAP(ce_strerror_t,"curl_easy_strerror",ce_strerror);
+	FMAP(ce_cleanup_t,"curl_easy_cleanup",ce_cleanup);
+
+	void *ch = ce_init();
+	if (ch == NULL) {
+		fprintf(stderr,"Error: Failed to initialise libcurl\n");
+		exit(EXIT_FAILURE);
+	}
+	/* Try to get the data */
+	const int CO_URL = 10002;
+	const int CO_WRITEFUNCTION = 20011;
+	const int CO_WRITEDATA = 10001;
+	const int CO_USERAGENT = 10018;
+	const int CO_FAILONERROR = 45;
+	//const int CO_VERBOSE = 41;
+	struct cfetch cfdata;
+
+	memset(&cfdata, 0, sizeof(cfdata));
+
+	/* Formulate the URL */
+	char buf[1024];
+	va_list ap;
+	va_start(ap, urlFmt);
+	vsnprintf(buf, sizeof(buf), urlFmt, ap);
+	va_end(ap);
+
+	ce_setopt(ch, CO_URL, buf);
+	ce_setopt(ch, CO_WRITEFUNCTION, curlCallback);
+	ce_setopt(ch, CO_WRITEDATA, (void *) &cfdata);
+	ce_setopt(ch, CO_USERAGENT, "irongrip/0.8");
+	ce_setopt(ch, CO_FAILONERROR, 1);
+	/*
+	ce_setopt(ch, CO_VERBOSE, 1);
+	// Set proxy information if necessary.
+    (*curl_easy_setopt)(curl, CURLOPT_PROXY, proxy);
+    (*curl_easy_setopt)(curl, CURLOPT_PROXYUSERPWD, proxy_user_pwd);
+	*/
+
+	void *res;
+	int err_code = ce_perform(ch);
+	if (err_code == 0) {
+		res = cfdata.data;
+		if (size != NULL) {
+			*size = cfdata.size;
+		}
+	} else {
+		printf("CURL err %d = %s\n", err_code, ce_strerror(err_code));
+		res = NULL;
+		if (size != NULL) {
+			*size = 0;
+		}
+		g_free(cfdata.data);
+	}
+	ce_cleanup(ch);
+
+cleanup:
+	// dlclose(h); // Would blow up application
+	return res;
+}
+
+/** Free memory associated with a mbartistcredit_t structure.  */
+static void freeArtist(mbartistcredit_t * ad)
+{
+	g_free(ad->artistName);
+	g_free(ad->artistNameSort);
+	for (uint8_t t = 0; t < ad->artistIdCount; t++) {
+		g_free(ad->artistId[t]);
+	}
+	g_free(ad->artistId);
+}
+
+static void freeMedium(mbmedium_t * md)
+{
+	g_free(md->title);
+	for (uint16_t t = 0; t < md->trackCount; t++) {
+		mbtrack_t *td = &md->track[t];
+		g_free(td->trackName);
+		freeArtist(&td->trackArtist);
+	}
+	g_free(md->track);
+}
+
+static void freeRelease(mbrelease_t * rel)
+{
+	g_free(rel->releaseGroupId);
+	g_free(rel->releaseId);
+	g_free(rel->asin);
+	g_free(rel->albumTitle);
+	g_free(rel->releaseType);
+	freeArtist(&rel->albumArtist);
+	freeMedium(&rel->medium);
+}
+
+static bool artistsAreIdentical(const mbartistcredit_t * ma, const mbartistcredit_t * mb)
+{
+	if (strcheck(ma->artistName, mb->artistName) != 0 ||
+		strcheck(ma->artistNameSort, mb->artistNameSort) != 0) {
+		return false;
+	}
+	return true;
+}
+
+static bool mediumsAreIdentical(const mbmedium_t * ma, const mbmedium_t * mb)
+{
+	if (ma->discNum != mb->discNum ||
+		ma->trackCount != mb->trackCount || strcheck(ma->title, mb->title) != 0) {
+		return false;
+	}
+	for (uint16_t t = 0; t < ma->trackCount; t++) {
+		const mbtrack_t *mta = &ma->track[t], *mtb = &mb->track[t];
+		if (strcheck(mta->trackName, mtb->trackName) != 0 ||
+			!artistsAreIdentical(&mta->trackArtist, &mtb->trackArtist)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool releasesAreIdentical(const mbrelease_t * ra, const mbrelease_t * rb)
+{
+	if (ra->discTotal != rb->discTotal ||
+		!artistsAreIdentical(&ra->albumArtist, &rb->albumArtist) ||
+		strcheck(ra->releaseGroupId, rb->releaseGroupId) != 0 ||
+		strcheck(ra->albumTitle, rb->albumTitle) != 0 ||
+		strcheck(ra->releaseType, rb->releaseType) != 0 ||
+		strcheck(ra->asin, rb->asin) != 0 || !mediumsAreIdentical(&ra->medium, &rb->medium)) {
+		return false;
+	}
+	return true;
+}
+
+static uint16_t dedupeMediums(uint16_t mediumCount, mbmedium_t * mr)
+{
+	for (uint16_t t = 0; t < mediumCount; t++) {
+		bool dupe = false;
+
+		for (uint16_t u = t + 1; u < mediumCount && !dupe; u++) {
+			if (mediumsAreIdentical(&mr[t], &mr[u])) {
+				dupe = true;
+			}
+		}
+
+		if (dupe) {
+			mediumCount--;
+			freeMedium(&mr[t]);
+			mr[t] = mr[mediumCount];
+			t--;
+		}
+	}
+
+	return mediumCount;
+}
+
+static void dedupeReleases(mbresult_t * mr)
+{
+	for (uint8_t t = 0; t < mr->releaseCount; t++) {
+		bool dupe = false;
+
+		for (uint8_t u = t + 1; u < mr->releaseCount && !dupe; u++) {
+			if (releasesAreIdentical(&mr->release[t], &mr->release[u])) {
+				dupe = true;
+			}
+		}
+
+		if (dupe) {
+			mr->releaseCount--;
+			freeRelease(&mr->release[t]);
+			mr->release[t] = mr->release[mr->releaseCount];
+			t--;
+		}
+	}
+}
+
+/** Process an %lt;artist-credit&gt; node. */
+static void processArtistCredit(struct xmlnode *artistCreditNode, mbartistcredit_t * cd)
+{
+
+	const char *s = XmlGetContent(artistCreditNode);
+	struct xmlnode *n = NULL;
+
+	assert(strcmp(XmlGetTag(artistCreditNode), "artist-credit") == 0);
+
+	/* Artist credit can have multiple entries... */
+	while ((s = XmlParseStr(&n, s)) != NULL) {
+		/* Process name-credits only at present */
+		if (XmlTagStrcmp(n, "name-credit") == 0) {
+			struct xmlnode *o, *artistNode = XmlFindSubNode(n, "artist");
+
+			cd->artistIdCount++;
+			cd->artistId = g_realloc(cd->artistId, sizeof(char *) * cd->artistIdCount);
+
+			cd->artistId[cd->artistIdCount - 1] = g_strdup(XmlGetAttribute(artistNode, "id"));
+
+			o = XmlFindSubNode(artistNode, "name");
+			if (o) {
+				const char *aa = XmlGetContent(o);
+
+				if (cd->artistName == NULL) {
+					cd->artistName = g_strdup(aa);
+				} else {
+					/* Concatenate multiple artists if needed */
+					cd->artistName =
+						g_realloc(cd->artistName, strlen(aa) + strlen(cd->artistName) + 3);
+
+					strcat(cd->artistName, ", ");
+					strcat(cd->artistName, aa);
+				}
+				XmlDestroy(&o);
+			}
+			o = XmlFindSubNode(artistNode, "sort-name");
+			if (o) {
+				cd->artistNameSort = g_strdup(XmlGetContent(o));
+				XmlDestroy(&o);
+			}
+			XmlDestroy(&artistNode);
+		}
+	}
+}
+
+/** Process a &lt;track&gt; track node.  */
+static void processTrackNode(struct xmlnode *trackNode, mbmedium_t * md)
+{
+	struct xmlnode *n = NULL;
+
+	assert(strcmp(XmlGetTag(trackNode), "track") == 0);
+
+	n = XmlFindSubNode(trackNode, "position");
+	if (n) {
+		uint16_t position = atoi(XmlGetContent(n));
+
+		if (position >= 1 && position <= md->trackCount) {
+			struct xmlnode *recording;
+			mbtrack_t *td = &md->track[position - 1];
+
+			recording = XmlFindSubNode(trackNode, "recording");
+			if (recording) {
+				struct xmlnode *m = NULL;
+				const char *id;
+
+				id = XmlGetAttribute(recording, "id");
+				if (id) {
+					td->trackId = g_strdup(id);
+				}
+				m = XmlFindSubNode(recording, "title");
+				if (m) {
+					td->trackName = g_strdup(XmlGetContent(m));
+					XmlDestroy(&m);
+				}
+				m = XmlFindSubNode(recording, "artist-credit");
+				if (m) {
+					processArtistCredit(m, &td->trackArtist);
+					XmlDestroy(&m);
+				}
+				XmlDestroy(&recording);
+			}
+		}
+		XmlDestroy(&n);
+	}
+}
+
+/** Process a &lt;medium&gt; node. */
+static bool processMediumNode(struct xmlnode *mediumNode, const char *discId, mbmedium_t * md)
+{
+	bool mediumValid = false;
+	struct xmlnode *n = NULL;
+
+	assert(strcmp(XmlGetTag(mediumNode), "medium") == 0);
+
+	memset(md, 0, sizeof(mbmedium_t));
+
+	/* First find the disc-list to check if the discId is present */
+	n = XmlFindSubNode(mediumNode, "disc-list");
+	if (n) {
+		struct xmlnode *disc = NULL;
+		const char *s;
+
+		s = XmlGetContent(n);
+		while ((s = XmlParseStr(&disc, s)) != NULL) {
+			if (XmlTagStrcmp(disc, "disc") == 0) {
+				const char *id = XmlGetAttribute(disc, "id");
+
+				if (id && strcmp(id, discId) == 0) {
+					mediumValid = true;
+				}
+			}
+		}
+		XmlDestroy(&disc);
+		XmlDestroy(&n);
+	}
+
+	/* Check if the medium should be processed */
+	if (mediumValid) {
+		memset(md, 0, sizeof(mbmedium_t));
+
+		n = XmlFindSubNode(mediumNode, "position");
+		if (n) {
+			md->discNum = atoi(XmlGetContent(n));
+			XmlDestroy(&n);
+		}
+		n = XmlFindSubNode(mediumNode, "title");
+		if (n) {
+			md->title = g_strdup(XmlGetContent(n));
+			XmlDestroy(&n);
+		}
+		n = XmlFindSubNode(mediumNode, "track-list");
+		if (n) {
+			const char *count = XmlGetAttribute(n, "count");
+
+			if (count) {
+				struct xmlnode *track = NULL;
+				const char *s;
+
+				md->trackCount = atoi(count);
+				md->track = g_malloc0(sizeof(mbtrack_t) * md->trackCount);
+
+				s = XmlGetContent(n);
+				while ((s = XmlParseStr(&track, s)) != NULL) {
+					if (XmlTagStrcmp(track, "track") == 0) {
+						processTrackNode(track, md);
+					}
+				}
+				mediumValid = true;
+				XmlDestroy(&track);
+			}
+			XmlDestroy(&n);
+		}
+	}
+	return mediumValid;
+}
+
+static uint16_t processReleaseNode(struct xmlnode *releaseNode, const char *discId,
+								   mbrelease_t * cd, mbmedium_t ** md)
+{
+	struct xmlnode *n;
+	assert(strcmp(XmlGetTag(releaseNode), "release") == 0);
+
+	memset(cd, 0, sizeof(mbrelease_t));
+
+	cd->releaseId = g_strdup(XmlGetAttribute(releaseNode, "id"));
+
+	n = XmlFindSubNode(releaseNode, "asin");
+	if (n) {
+		cd->asin = g_strdup(XmlGetContent(n));
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "title");
+	if (n) {
+		cd->albumTitle = g_strdup(XmlGetContent(n));
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "release-group");
+	if (n) {
+		cd->releaseType = g_strdup(XmlGetAttribute(n, "type"));
+		cd->releaseGroupId = g_strdup(XmlGetAttribute(n, "id"));
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "artist-credit");
+	if (n) {
+		processArtistCredit(n, &cd->albumArtist);
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "medium-list");
+	if (n) {
+		const char *s, *count = XmlGetAttribute(n, "count");
+		struct xmlnode *m = NULL;
+		mbmedium_t *mediums = NULL;
+		uint16_t mediumCount = 0;
+
+		if (count) {
+			cd->discTotal = atoi(count);
+		}
+		s = XmlGetContent(n);
+
+		while ((s = XmlParseStr(&m, s)) != NULL) {
+			if (XmlTagStrcmp(m, "medium") == 0) {
+				mediums = g_realloc(mediums, sizeof(mbmedium_t) * (mediumCount + 1));
+				if (processMediumNode(m, discId, &mediums[mediumCount])) {
+					mediumCount++;
+				}
+			}
+		}
+		XmlDestroy(&n);
+		XmlDestroy(&m);
+		mediumCount = dedupeMediums(mediumCount, mediums);
+		*md = mediums;
+		return mediumCount;
+	} else {
+		*md = NULL;
+		return 0;
+	}
+}
+
+/** Process a release. */
+static bool processRelease(const char *releaseId, const char *discId, mbresult_t * res)
+{
+	struct xmlnode *metaNode = NULL, *releaseNode = NULL;
+	void *buf;
+	const char *s;
+
+	s = buf = CurlFetch(NULL,
+		  "http://musicbrainz.org/ws/2/release/%s?inc=recordings+artists+release-groups+discids+artist-credits",
+			  releaseId);
+	if (buf == NULL) {
+		return false;
+	}
+	/* Find the metadata node */
+	do {
+		s = XmlParseStr(&metaNode, s);
+	}
+	while (metaNode != NULL && XmlTagStrcmp(metaNode, "metadata") != 0);
+
+	g_free(buf);
+
+	if (metaNode == NULL) {
+		return false;
+	}
+	releaseNode = XmlFindSubNodeFree(metaNode, "release");
+	if (releaseNode) {
+		mbmedium_t *medium = NULL;
+		uint16_t mediumCount;
+		mbrelease_t release;
+		mediumCount = processReleaseNode(releaseNode, discId, &release, &medium);
+
+		for (uint16_t m = 0; m < mediumCount; m++) {
+			mbrelease_t *newRel;
+			res->releaseCount++;
+			res->release = g_realloc(res->release, sizeof(mbrelease_t) * res->releaseCount);
+			newRel = &res->release[res->releaseCount - 1];
+			memcpy(newRel, &release, sizeof(mbrelease_t));
+			memcpy(&newRel->medium, &medium[m], sizeof(mbmedium_t));
+		}
+		XmlDestroy(&releaseNode);
+		return true;
+	}
+	return false;
+}
+
+/** Lookup some CD.
+ * \param[in] discId  The ID of the CD to lookup.
+ * \param[in] res     Pointer to populate with the results.
+ * \retval true   If the CD found and the results returned.
+ * \retval false  If the CD is unknown to MusicBrainz.
+ */
+static bool musicbrainz_lookup(const char *discId, mbresult_t * res)
+{
+	printf("Musicbrainz = http://musicbrainz.org/ws/2/discid/%s\n", discId);
+	memset(res, 0, sizeof(mbresult_t));
+	void *buf;
+	const char *s;
+	s = buf = CurlFetch(NULL, "http://musicbrainz.org/ws/2/discid/%s", discId);
+	if (!buf) {
+		return false;
+	}
+	struct xmlnode *metaNode = NULL;
+	/* Find the metadata node */
+	do {
+		s = XmlParseStr(&metaNode, s);
+	}
+	while (metaNode != NULL && XmlTagStrcmp(metaNode, "metadata") != 0);
+	g_free(buf);
+	if (metaNode == NULL) {
+		return false;
+	}
+	struct xmlnode *releaseListNode = NULL;
+	releaseListNode = XmlFindSubNodeFree(XmlFindSubNodeFree(metaNode, "disc"), "release-list");
+	if (releaseListNode) {
+		struct xmlnode *releaseNode = NULL;
+		const char *s = XmlGetContent(releaseListNode);
+		while ((s = XmlParseStr(&releaseNode, s)) != NULL) {
+			const char *releaseId;
+			if ((releaseId = XmlGetAttribute(releaseNode, "id")) != NULL) {
+				processRelease(releaseId, discId, res);
+			}
+		}
+		XmlDestroy(&releaseNode);
+		dedupeReleases(res);
+	}
+	XmlDestroy(&releaseListNode);
+	return true;
+}
+
+static void mb_free(mbresult_t * res)
+{
+	if(res==NULL) return;
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		freeRelease(&res->release[r]);
+	}
+	g_free(res->release);
+}
+
+/** Print a result structure to stdout.  */
+static void musicbrainz_print(const mbresult_t * res, char *path)
+{
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		mbrelease_t *rel = &res->release[r];
+		char *file = g_strdup_printf("%s/%s_MusicBrainz.txt", path, rel->releaseId);
+		FILE *fd = fopen(file, "wb");
+		g_free(file);
+		fprintf(fd,"Release=%s\n", rel->releaseId);
+		fprintf(fd,"  ASIN=%s\n", rel->asin);
+		fprintf(fd,"  Album=%s\n", rel->albumTitle);
+		fprintf(fd,"  AlbumArtist=%s\n", rel->albumArtist.artistName);
+		fprintf(fd,"  AlbumArtistSort=%s\n", rel->albumArtist.artistNameSort);
+		fprintf(fd,"  ReleaseType=%s\n", rel->releaseType);
+		fprintf(fd,"  ReleaseGroupId=%s\n", rel->releaseGroupId);
+
+		for (uint8_t t = 0; t < rel->albumArtist.artistIdCount; t++) {
+			fprintf(fd,"  ArtistId=%s\n", rel->albumArtist.artistId[t]);
+		}
+
+		fprintf(fd,"  Total Disc=%u\n", rel->discTotal);
+
+		const mbmedium_t *mb = &rel->medium;
+
+		fprintf(fd,"  Medium\n");
+		fprintf(fd,"    DiscNum=%u\n", mb->discNum);
+		fprintf(fd,"    Title=%s\n", mb->title);
+
+		for (uint16_t u = 0; u < mb->trackCount; u++) {
+			const mbtrack_t *td = &mb->track[u];
+			fprintf(fd,"    Track %u\n", u);
+			fprintf(fd,"      Id=%s\n", td->trackId);
+			fprintf(fd,"      Title=%s\n", td->trackName);
+			fprintf(fd,"      Artist=%s\n", td->trackArtist.artistName);
+			fprintf(fd,"      ArtistSort=%s\n", td->trackArtist.artistNameSort);
+			for (uint8_t t = 0; t < td->trackArtist.artistIdCount; t++) {
+				fprintf(fd,"      ArtistId=%s\n", td->trackArtist.artistId[t]);
+			}
+		}
+		fclose(fd);
+	}
+}
+
+#define M_ArraySize(a)  (sizeof(a) / sizeof(a[0]))
+
+// TODO: handle one pixel GIF from Amazon
+/*
+0000000: 4749 4638 3961 0100 0100 8001 0000 0000  GIF89a..........
+0000010: ffff ff21 f904 0100 0001 002c 0000 0000  ...!.......,....
+0000020: 0100 0100 0002 024c 0100 3b              .......L..;
+
+unsigned char AmazonOnePixelGIF[] = {
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x01,
+  0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00,
+  0x00, 0x01, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+  0x00, 0x02, 0x02, 0x4c, 0x01, 0x00, 0x3b
+};
+unsigned int AmazonOnePixelGIF_len = 43;
+*/
+static void fetch_image(const mbresult_t *res, char *path) {
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		mbrelease_t *rel = &res->release[r];
+		if(!rel->asin) continue;
+		const char *artUrl[] = {
+			"http://images.amazon.com/images/P/%s.02._SCLZZZZZZZ_.jpg", /* UK */
+			"http://images.amazon.com/images/P/%s.01._SCLZZZZZZZ_.jpg", /* US */
+			"http://images.amazon.com/images/P/%s.03._SCLZZZZZZZ_.jpg", /* DE */
+			"http://images.amazon.com/images/P/%s.08._SCLZZZZZZZ_.jpg", /* FR */
+			"http://images.amazon.com/images/P/%s.09._SCLZZZZZZZ_.jpg"  /* JP */
+		};
+		const char *artCountry[] = { "UK", "US", "DE", "FR", "JP" };
+		uint8_t attempt = 0;
+		do {
+			size_t sz = 0;
+			const char *s = CurlFetch(&sz, artUrl[attempt], rel->asin);
+			if(!s) continue;
+			if(sz<256) continue;
+			// printf(artUrl[attempt], rel->asin); printf("\n");
+			char *file = g_strdup_printf("%s/%s_Amazon_%s_%s.jpg", g_prefs->music_dir,
+							rel->releaseId, rel->asin, artCountry[attempt]);
+			FILE *fd = fopen(file, "wb");
+			g_free(file);
+			if(fd) {
+				fwrite(s,1,sz,fd);
+				fclose(fd);
+				break;
+			}
+		} while(++attempt < M_ArraySize(artUrl));
+	}
 }
 
 int main(int argc, char *argv[])

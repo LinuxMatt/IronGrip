@@ -6069,14 +6069,27 @@ static void mb_free(mbresult_t * res)
 	g_free(res->release);
 }
 
+#define HTML_HEADER \
+"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n" \
+"\t\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n" \
+"<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" \
+"<head>\n<title>Data from MusicBrainz</title>\n</head>\n<body>\n"
+
 /** Print a result structure to stdout.  */
 static void musicbrainz_print(const mbresult_t * res, char *path)
 {
 	for (uint16_t r = 0; r < res->releaseCount; r++) {
 		mbrelease_t *rel = &res->release[r];
 		char *file = g_strdup_printf("%s/%s_MusicBrainz.txt", path, rel->releaseId);
+		char *html = g_strdup_printf("%s/%s_MusicBrainz.html", path, rel->releaseId);
 		FILE *fd = fopen(file, "wb");
+		FILE *fh = fopen(html, "wb");
 		g_free(file);
+		g_free(html);
+		fprintf(fh, HTML_HEADER);
+		gchar *url = g_strdup_printf("http://musicbrainz.org/release/%s", rel->releaseId);
+		fprintf(fh, "<a href=\"%s\">%s</a></body>\n</html>\n", url, url);
+		g_free(url);
 		fprintf(fd,"Release=%s\n", rel->releaseId);
 		fprintf(fd,"  ASIN=%s\n", rel->asin);
 		fprintf(fd,"  Album=%s\n", rel->albumTitle);
@@ -6109,6 +6122,7 @@ static void musicbrainz_print(const mbresult_t * res, char *path)
 			}
 		}
 		fclose(fd);
+		fclose(fh);
 	}
 }
 

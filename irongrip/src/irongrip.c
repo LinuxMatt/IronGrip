@@ -432,9 +432,9 @@ static void sigchld();
 static void set_gui_action(int action, gboolean wait);
 static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name);
 static bool musicbrainz_lookup(const char *discId, mbresult_t * res);
-static void musicbrainz_print(const mbresult_t * res, char *path);
+static void musicbrainz_print(FILE *fd, const mbrelease_t * rel);
 static void musicbrainz_scan(const mbresult_t * res, char *path);
-static void fetch_image(const mbresult_t *res, char *path);
+static void fetch_image(const mbrelease_t *rel, char *path);
 static void mb_free(mbresult_t * res);
 
 /** Compare two strings, either of which maybe NULL.  */
@@ -2155,8 +2155,6 @@ static void on_seek_clicked(GtkToolButton *button, gpointer user_data)
 
 	mbresult_t res;
 	if(musicbrainz_lookup(g_data->disc_id, &res)) {
-		musicbrainz_print(&res, g_prefs->music_dir);
-		fetch_image(&res, g_prefs->music_dir);
 		musicbrainz_scan(&res, g_prefs->music_dir);
 	}
 	mb_free(&res);
@@ -5986,7 +5984,6 @@ static bool processRelease(const char *releaseId, const char *discId, mbresult_t
 	if (buf == NULL) {
 		return false;
 	}
-	printf("Release WS2 = http://musicbrainz.org/ws/2/release/%s\n", releaseId);
 	/* Find the metadata node */
 	do {
 		s = XmlParseStr(&metaNode, s);
@@ -6027,7 +6024,6 @@ static bool processRelease(const char *releaseId, const char *discId, mbresult_t
  */
 static bool musicbrainz_lookup(const char *discId, mbresult_t * res)
 {
-	printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", discId);
 	memset(res, 0, sizeof(mbresult_t));
 	void *buf;
 	const char *s;
@@ -6091,22 +6087,44 @@ static void maystore(char *d, char *a) {
 	}
 }
 
+#define HTML_HEADER \
+"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n" \
+"\t\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n" \
+"<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" \
+"<head>\n<title>Data from MusicBrainz</title>\n</head>\n<body>\n"
+
 static void musicbrainz_scan(const mbresult_t * res, char *path)
 {
 	const char *FILTERS[] = { "http://", "coverartarchive.org/release/", NULL };
 	const char *ANTIPATTERNS[] =  { "musicbrainz.org", "www.w3.org/", "purl.org/", "metabrainz.org/", NULL };
 
+	gchar *dir = g_strdup_printf("%s/MusicBrainz-DiscId-[%s]", path, g_data->disc_id);
+	if(!mkdir_p(dir)) return;
+
+	printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", g_data->disc_id);
+
 	for (uint16_t r = 0; r < res->releaseCount; r++) {
 		mbrelease_t *rel = &res->release[r];
+
+		fetch_image(rel, dir);
+
+		char *html = g_strdup_printf("%s/%s_MusicBrainz.html", dir, rel->releaseId);
+		FILE *fh = fopen(html, "wb");
+		g_free(html);
+		fprintf(fh, HTML_HEADER);
+		gchar *url = g_strdup_printf("http://musicbrainz.org/release/%s", rel->releaseId);
+		fprintf(fh, "<p>Release page : <a href=\"%s\">%s</a></p><pre>\n", url, url);
+		//printf("Release WS2 = http://musicbrainz.org/ws/2/release/%s\n", rel->releaseId);
+		g_free(url);
+		musicbrainz_print(fh,rel);
+		fprintf(fh, "</pre>\n");
 		size_t sz = 0;
 		const char *fmt = "http://musicbrainz.org/release/%s";
-		printf("Release page = http://musicbrainz.org/release/%s\n", rel->releaseId);
 		char *c = CurlFetch(&sz, fmt, rel->releaseId);
-		if(!c) continue;
-		if(sz<256) continue;
+		if(!c) goto next;
+		if(sz<256) goto next;
 		char *b = calloc(1, sz); // working copy
 		char *d = calloc(1, sz); // output
-
 		for(const char **f = FILTERS;*f;f++) {
 			memcpy(b,c,sz);
 			for(char *p=b;*p;p++) {
@@ -6127,67 +6145,43 @@ static void musicbrainz_scan(const mbresult_t * res, char *path)
 				}
 			}
 		}
-		printf("%s\n", d);
+		fprintf(fh,"<pre>%s</pre>\n", d);
 		g_free(b);
 		g_free(c);
 		g_free(d);
+next:
+		fprintf(fh, "</body>\n</html>\n");
+		fclose(fh);
 	}
 }
 
-#define HTML_HEADER \
-"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n" \
-"\t\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n" \
-"<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" \
-"<head>\n<title>Data from MusicBrainz</title>\n</head>\n<body>\n"
-
-/** Print a result structure to stdout.  */
-static void musicbrainz_print(const mbresult_t * res, char *path)
+static void musicbrainz_print(FILE *fd, const mbrelease_t *rel)
 {
-	for (uint16_t r = 0; r < res->releaseCount; r++) {
-		mbrelease_t *rel = &res->release[r];
-		char *file = g_strdup_printf("%s/%s_MusicBrainz.txt", path, rel->releaseId);
-		char *html = g_strdup_printf("%s/%s_MusicBrainz.html", path, rel->releaseId);
-		FILE *fd = fopen(file, "wb");
-		FILE *fh = fopen(html, "wb");
-		g_free(file);
-		g_free(html);
-		fprintf(fh, HTML_HEADER);
-		gchar *url = g_strdup_printf("http://musicbrainz.org/release/%s", rel->releaseId);
-		fprintf(fh, "<a href=\"%s\">%s</a></body>\n</html>\n", url, url);
-		g_free(url);
-		fprintf(fd,"Release=%s\n", rel->releaseId);
-		fprintf(fd,"  ASIN=%s\n", rel->asin);
-		fprintf(fd,"  Album=%s\n", rel->albumTitle);
-		fprintf(fd,"  AlbumArtist=%s\n", rel->albumArtist.artistName);
-		fprintf(fd,"  AlbumArtistSort=%s\n", rel->albumArtist.artistNameSort);
-		fprintf(fd,"  ReleaseType=%s\n", rel->releaseType);
-		fprintf(fd,"  ReleaseGroupId=%s\n", rel->releaseGroupId);
-
-		for (uint8_t t = 0; t < rel->albumArtist.artistIdCount; t++) {
-			fprintf(fd,"  ArtistId=%s\n", rel->albumArtist.artistId[t]);
+	fprintf(fd,"Release=%s\n", rel->releaseId);
+	fprintf(fd,"  ASIN=%s\n", rel->asin);
+	fprintf(fd,"  Album=%s\n", rel->albumTitle);
+	fprintf(fd,"  AlbumArtist=%s\n", rel->albumArtist.artistName);
+	fprintf(fd,"  AlbumArtistSort=%s\n", rel->albumArtist.artistNameSort);
+	fprintf(fd,"  ReleaseType=%s\n", rel->releaseType);
+	fprintf(fd,"  ReleaseGroupId=%s\n", rel->releaseGroupId);
+	for (uint8_t t = 0; t < rel->albumArtist.artistIdCount; t++) {
+		fprintf(fd,"  ArtistId=%s\n", rel->albumArtist.artistId[t]);
+	}
+	fprintf(fd,"  Total Disc=%u\n", rel->discTotal);
+	const mbmedium_t *mb = &rel->medium;
+	fprintf(fd,"  Medium\n");
+	fprintf(fd,"    DiscNum=%u\n", mb->discNum);
+	fprintf(fd,"    Title=%s\n", mb->title);
+	for (uint16_t u = 0; u < mb->trackCount; u++) {
+		const mbtrack_t *td = &mb->track[u];
+		fprintf(fd,"    Track %u\n", u);
+		fprintf(fd,"      Id=%s\n", td->trackId);
+		fprintf(fd,"      Title=%s\n", td->trackName);
+		fprintf(fd,"      Artist=%s\n", td->trackArtist.artistName);
+		fprintf(fd,"      ArtistSort=%s\n", td->trackArtist.artistNameSort);
+		for (uint8_t t = 0; t < td->trackArtist.artistIdCount; t++) {
+			fprintf(fd,"      ArtistId=%s\n", td->trackArtist.artistId[t]);
 		}
-
-		fprintf(fd,"  Total Disc=%u\n", rel->discTotal);
-
-		const mbmedium_t *mb = &rel->medium;
-
-		fprintf(fd,"  Medium\n");
-		fprintf(fd,"    DiscNum=%u\n", mb->discNum);
-		fprintf(fd,"    Title=%s\n", mb->title);
-
-		for (uint16_t u = 0; u < mb->trackCount; u++) {
-			const mbtrack_t *td = &mb->track[u];
-			fprintf(fd,"    Track %u\n", u);
-			fprintf(fd,"      Id=%s\n", td->trackId);
-			fprintf(fd,"      Title=%s\n", td->trackName);
-			fprintf(fd,"      Artist=%s\n", td->trackArtist.artistName);
-			fprintf(fd,"      ArtistSort=%s\n", td->trackArtist.artistNameSort);
-			for (uint8_t t = 0; t < td->trackArtist.artistIdCount; t++) {
-				fprintf(fd,"      ArtistId=%s\n", td->trackArtist.artistId[t]);
-			}
-		}
-		fclose(fd);
-		fclose(fh);
 	}
 }
 
@@ -6207,36 +6201,33 @@ unsigned char AmazonOnePixelGIF[] = {
 };
 unsigned int AmazonOnePixelGIF_len = 43;
 */
-static void fetch_image(const mbresult_t *res, char *path) {
-	for (uint16_t r = 0; r < res->releaseCount; r++) {
-		mbrelease_t *rel = &res->release[r];
-		if(!rel->asin) continue;
-		const char *artUrl[] = {
-			"http://images.amazon.com/images/P/%s.02._SCLZZZZZZZ_.jpg", /* UK */
-			"http://images.amazon.com/images/P/%s.01._SCLZZZZZZZ_.jpg", /* US */
-			"http://images.amazon.com/images/P/%s.03._SCLZZZZZZZ_.jpg", /* DE */
-			"http://images.amazon.com/images/P/%s.08._SCLZZZZZZZ_.jpg", /* FR */
-			"http://images.amazon.com/images/P/%s.09._SCLZZZZZZZ_.jpg"  /* JP */
-		};
-		const char *artCountry[] = { "UK", "US", "DE", "FR", "JP" };
-		uint8_t attempt = 0;
-		do {
-			size_t sz = 0;
-			const char *s = CurlFetch(&sz, artUrl[attempt], rel->asin);
-			if(!s) continue;
-			if(sz<256) continue;
-			// printf(artUrl[attempt], rel->asin); printf("\n");
-			char *file = g_strdup_printf("%s/%s_Amazon_%s_%s.jpg", g_prefs->music_dir,
+static void fetch_image(const mbrelease_t *rel, char *path) {
+	if(!rel->asin) return;
+	const char *artUrl[] = {
+		"http://images.amazon.com/images/P/%s.02._SCLZZZZZZZ_.jpg", /* UK */
+		"http://images.amazon.com/images/P/%s.01._SCLZZZZZZZ_.jpg", /* US */
+		"http://images.amazon.com/images/P/%s.03._SCLZZZZZZZ_.jpg", /* DE */
+		"http://images.amazon.com/images/P/%s.08._SCLZZZZZZZ_.jpg", /* FR */
+		"http://images.amazon.com/images/P/%s.09._SCLZZZZZZZ_.jpg"  /* JP */
+	};
+	const char *artCountry[] = { "UK", "US", "DE", "FR", "JP" };
+	uint8_t attempt = 0;
+	do {
+		size_t sz = 0;
+		const char *s = CurlFetch(&sz, artUrl[attempt], rel->asin);
+		if(!s) continue;
+		if(sz<256) continue;
+		// printf(artUrl[attempt], rel->asin); printf("\n");
+		char *file = g_strdup_printf("%s/%s_Amazon_%s_%s.jpg", path,
 							rel->releaseId, rel->asin, artCountry[attempt]);
-			FILE *fd = fopen(file, "wb");
-			g_free(file);
-			if(fd) {
-				fwrite(s,1,sz,fd);
-				fclose(fd);
-				break;
-			}
-		} while(++attempt < M_ArraySize(artUrl));
-	}
+		FILE *fd = fopen(file, "wb");
+		g_free(file);
+		if(fd) {
+			fwrite(s,1,sz,fd);
+			fclose(fd);
+			break;
+		}
+	} while(++attempt < M_ArraySize(artUrl));
 }
 
 int main(int argc, char *argv[])

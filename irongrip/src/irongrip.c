@@ -433,6 +433,7 @@ static void set_gui_action(int action, gboolean wait);
 static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name);
 static bool musicbrainz_lookup(const char *discId, mbresult_t * res);
 static void musicbrainz_print(const mbresult_t * res, char *path);
+static void musicbrainz_scan(const mbresult_t * res, char *path);
 static void fetch_image(const mbresult_t *res, char *path);
 static void mb_free(mbresult_t * res);
 
@@ -2156,6 +2157,7 @@ static void on_seek_clicked(GtkToolButton *button, gpointer user_data)
 	if(musicbrainz_lookup(g_data->disc_id, &res)) {
 		musicbrainz_print(&res, g_prefs->music_dir);
 		fetch_image(&res, g_prefs->music_dir);
+		musicbrainz_scan(&res, g_prefs->music_dir);
 	}
 	mb_free(&res);
 }
@@ -5984,6 +5986,7 @@ static bool processRelease(const char *releaseId, const char *discId, mbresult_t
 	if (buf == NULL) {
 		return false;
 	}
+	printf("Release WS2 = http://musicbrainz.org/ws/2/release/%s\n", releaseId);
 	/* Find the metadata node */
 	do {
 		s = XmlParseStr(&metaNode, s);
@@ -6024,7 +6027,7 @@ static bool processRelease(const char *releaseId, const char *discId, mbresult_t
  */
 static bool musicbrainz_lookup(const char *discId, mbresult_t * res)
 {
-	printf("Musicbrainz = http://musicbrainz.org/ws/2/discid/%s\n", discId);
+	printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", discId);
 	memset(res, 0, sizeof(mbresult_t));
 	void *buf;
 	const char *s;
@@ -6067,6 +6070,68 @@ static void mb_free(mbresult_t * res)
 		freeRelease(&res->release[r]);
 	}
 	g_free(res->release);
+}
+
+static void maystore(char *d, char *a) {
+	const char *PATTERNS[] =  { "ecx.images-amazon.com",
+								"www.allmusic.com/album/",
+								"www.discogs.com/master/",
+								"www.discogs.com/release/",
+								"www.youtube.com/watch?v=",
+								NULL };
+	for(const char **y = PATTERNS;*y;y++) {
+		if(strstr(a, *y)) {
+			// printf("%s\n", a);
+			if(!strstr(d,a)) {
+				strcat(d,a);
+				strcat(d,"\n");
+			}
+			break;
+		}
+	}
+}
+
+static void musicbrainz_scan(const mbresult_t * res, char *path)
+{
+	const char *FILTERS[] = { "http://", "coverartarchive.org/release/", NULL };
+	const char *ANTIPATTERNS[] =  { "musicbrainz.org", "www.w3.org/", "purl.org/", "metabrainz.org/", NULL };
+
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		mbrelease_t *rel = &res->release[r];
+		size_t sz = 0;
+		const char *fmt = "http://musicbrainz.org/release/%s";
+		printf("Release page = http://musicbrainz.org/release/%s\n", rel->releaseId);
+		char *c = CurlFetch(&sz, fmt, rel->releaseId);
+		if(!c) continue;
+		if(sz<256) continue;
+		char *b = calloc(1, sz); // working copy
+		char *d = calloc(1, sz); // output
+
+		for(const char **f = FILTERS;*f;f++) {
+			memcpy(b,c,sz);
+			for(char *p=b;*p;p++) {
+				char *a = strstr(p, *f);
+				if(a == NULL) {
+					// fprintf(stderr, "BREAKING with %lu bytes remaining out of %lu\n", strlen(p), sz);
+					break;
+				}
+				for(char *e = a+strlen(*f);*e;e++) {
+					if(*e != '<' && *e != '"' && !isspace(*e)) continue;
+					*e = 0; p = e;
+					int found = 0;
+					for(const char **x = ANTIPATTERNS;*x;x++) {
+						if(strstr(a, *x)) { found=1; break; }
+					}
+					if(!found) { maystore(d,a); }
+					break;
+				}
+			}
+		}
+		printf("%s\n", d);
+		g_free(b);
+		g_free(c);
+		g_free(d);
+	}
 }
 
 #define HTML_HEADER \

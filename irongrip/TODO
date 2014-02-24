@@ -1,6 +1,11 @@
 TODO
 ====
 
+Bugs:
+-----
+
+
+
 Higher priority:
 ----------------
 * Add 'play track' buttons next to each track number
@@ -15,6 +20,7 @@ Normal priority:
 
 Lower priority:
 ---------------
+* Fetch images from http://www.discogs.com/viewimages?release=id
 * Add easy-make 'setup' (installs requirements)
 * Add tooltips on options in preferences
 * Display remaining free space:

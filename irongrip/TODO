@@ -4,28 +4,21 @@ TODO
 Bugs:
 -----
 
-
-
-Higher priority:
-----------------
+Features for v1.x:
+-----------------
 * Add 'play track' buttons next to each track number
-* Add experimental option : 'Fetch Musicbrainz metadata' (requires libcurl)
+* Add full support for musicbrainz (on a par with cddb)
 
 Normal priority:
 ---------------
 * Find help to make packages for many Linux distributions (Fedora, Slackware...)
 * Find help to translate irongrip
 * Replace maintainer-build.sh with autogen.sh
-* Add support for libmusicbrainz
 
 Lower priority:
 ---------------
 * Fetch images from http://www.discogs.com/viewimages?release=id
-* Add easy-make 'setup' (installs requirements)
 * Add tooltips on options in preferences
-* Display remaining free space:
-http://stackoverflow.com/questions/4965355/converting-statvfs-to-percentage-free-correctly
-
 * Add experimental option : 'Download cover art' (requires libcurl)
 * .cddbslave multiple matches not working (bug in libcddb)
 * when cdrom drive is changed in preferences, scan again asap
@@ -47,3 +40,7 @@ Done in next branch for v0.9
 https://wiki.ubuntu.com/DebuggingProgramCrash#Debug_Symbol_Packages
 
 * Fix compilation on Ubuntu 8.04
+* easy-make 'setup' (installs requirements) for Debian/Ubuntu/LinuxMint
+* Show remaining free space on the filesystem of the output directory
+* (experimental, early stage) IronSeek engine : seeks metadata and covers
+  from MusicBrainz (requires libcurl)

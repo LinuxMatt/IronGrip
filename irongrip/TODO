@@ -3,6 +3,8 @@ TODO
 
 Bugs:
 -----
+* When CDDB lookup is OFF, GUI does not refresh on 2nd Audio disc.
+* Fix progress bar not always going to 100% when job is finished.
 
 Features for v1.x:
 -----------------
@@ -24,7 +26,6 @@ Lower priority:
 * when cdrom drive is changed in preferences, scan again asap
 * Use libnotify
 * Remove annoying 'reading disc contents' message
-* Fix progress bar not always going to 100% when job is finished.
 * Enable logging on console (stderr)
 * use --best for flac compression (-8 is still equivalent)
 * Fix log output format

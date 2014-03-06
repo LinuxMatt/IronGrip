@@ -6068,22 +6068,21 @@ static void mb_free(mbresult_t * res)
 	g_free(res->release);
 }
 
-static void maystore(char *d, char *a) {
+static void maystore(GList **d, char *a) {
 	const char *PATTERNS[] =  { "ecx.images-amazon.com",
 								"www.allmusic.com/album/",
 								"www.discogs.com/master/",
 								"www.discogs.com/release/",
 								"www.youtube.com/watch?v=",
 								NULL };
+	for (GList *c = g_list_first(*d); c != NULL; c = g_list_next(c)) {
+		char *s = (char *) c->data;
+		if(strcmp(a,s)==0) return;
+	}
 	for(const char **y = PATTERNS;*y;y++) {
-		if(strstr(a, *y)) {
-			// printf("%s\n", a);
-			if(!strstr(d,a)) {
-				strcat(d,a);
-				strcat(d,"\n");
-			}
-			break;
-		}
+		if(!strstr(a, *y)) continue;
+		*d = g_list_append(*d, g_strdup(a));
+		return;
 	}
 }
 
@@ -6101,7 +6100,7 @@ static void musicbrainz_scan(const mbresult_t * res, char *path)
 	gchar *dir = g_strdup_printf("%s/MusicBrainz-DiscId-[%s]", path, g_data->disc_id);
 	if(!mkdir_p(dir)) return;
 
-	printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", g_data->disc_id);
+	//printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", g_data->disc_id);
 
 	for (uint16_t r = 0; r < res->releaseCount; r++) {
 		mbrelease_t *rel = &res->release[r];
@@ -6113,18 +6112,16 @@ static void musicbrainz_scan(const mbresult_t * res, char *path)
 		g_free(html);
 		fprintf(fh, HTML_HEADER);
 		gchar *url = g_strdup_printf("http://musicbrainz.org/release/%s", rel->releaseId);
-		fprintf(fh, "<p>Release page : <a href=\"%s\">%s</a></p><pre>\n", url, url);
+		fprintf(fh, "<p>Release page : <a href=\"%s\">%s</a></p>\n", url, url);
 		//printf("Release WS2 = http://musicbrainz.org/ws/2/release/%s\n", rel->releaseId);
 		g_free(url);
-		musicbrainz_print(fh,rel);
-		fprintf(fh, "</pre>\n");
 		size_t sz = 0;
 		const char *fmt = "http://musicbrainz.org/release/%s";
 		char *c = CurlFetch(&sz, fmt, rel->releaseId);
 		if(!c) goto next;
 		if(sz<256) goto next;
 		char *b = calloc(1, sz); // working copy
-		char *d = calloc(1, sz); // output
+		GList *d = NULL;
 		for(const char **f = FILTERS;*f;f++) {
 			memcpy(b,c,sz);
 			for(char *p=b;*p;p++) {
@@ -6140,16 +6137,23 @@ static void musicbrainz_scan(const mbresult_t * res, char *path)
 					for(const char **x = ANTIPATTERNS;*x;x++) {
 						if(strstr(a, *x)) { found=1; break; }
 					}
-					if(!found) { maystore(d,a); }
+					if(!found) { maystore(&d,a); }
 					break;
 				}
 			}
 		}
-		fprintf(fh,"<pre>%s</pre>\n", d);
+		// printf("G_LIST_LENGTH = %d\n", g_list_length(d));
+		for (GList *c = g_list_first(d); c != NULL; c = g_list_next(c)) {
+			char *s = (char *) c->data;
+			fprintf(fh,"<pre>%s</pre>\n", s);
+		}
 		g_free(b);
 		g_free(c);
-		g_free(d);
+		if(d) g_list_free(d);
 next:
+		fprintf(fh, "<pre>");
+		musicbrainz_print(fh,rel);
+		fprintf(fh, "</pre>");
 		fprintf(fh, "</body>\n</html>\n");
 		fclose(fh);
 	}

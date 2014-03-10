@@ -1,11 +1,12 @@
 #!/bin/bash
 
 usage() {
-	echo -e "\nUSAGE: $0 <clean|build|package|setup>\n"
+	echo -e "\nUSAGE: $0 <clean|build|package|setup|rundeps>\n"
 	echo -e "\tsetup  : install required deb packages for building"
 	echo -e "\tbuild  : configure and compile this project"
 	echo -e "\tpackage: create a Debian package for this project"
 	echo -e "\tclean  : remove the files created by the 'build' action"
+	echo -e "\trundeps: install recommended deb packages for running"
 	echo -e ""
 	exit 2
 }
@@ -18,7 +19,7 @@ ACTION=$1
 cd irongrip/
 
 case "$ACTION" in
-	"build" | "package" | "clean" | "setup")
+	"build" | "package" | "clean" | "setup" | "rundeps")
 		;;
 	*)
 		usage

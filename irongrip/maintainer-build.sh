@@ -4,7 +4,7 @@
 PROGRAM=irongrip
 
 usage() {
-	echo "USAGE: $0 <clean|build|package|setup>"
+	echo "USAGE: $0 <clean|build|package|setup|rundeps>"
 	exit 2
 }
 
@@ -17,6 +17,13 @@ action_debian_setup() {
     sudo apt-get install -q dh-make
     sudo apt-get install -q libgtk2.0-dev
     sudo apt-get install -q intltool
+}
+
+action_debian_run_dependencies() {
+	sudo apt-get install -q cdparanoia
+	sudo apt-get install -q lame
+	sudo apt-get install -q flac
+	sudo apt-get install -q vorbis-tools
 }
 
 action_clean() {
@@ -113,6 +120,9 @@ case "x$ACTION" in
 		;;
 	"xsetup")
 		action_debian_setup
+		;;
+	"xrundeps")
+		action_debian_run_dependencies
 		;;
 	*)
 		usage

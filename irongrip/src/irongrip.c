@@ -1404,7 +1404,7 @@ static bool check_disc()
 		}
 		drive_opened = true;
 		if(!alreadyGood) {
-			set_status("<b>Reading disc contents...</b>");
+			//set_status("<b>Reading disc contents...</b>");
 			GTK_REFRESH;
 		}
 		g_atomic_int_set(&g_data->ioctl_thread_running, 1);
@@ -1429,7 +1429,7 @@ static bool check_disc()
 	}
 	alreadyGood = false;
 	if (!drive_opened) {
-		set_status("Error: cannot access to the cdrom drive !");
+		set_status("Cannot access cdrom drive (maybe missing, busy, or tray opened).");
 	} else {
 		Sleep(700);
 		set_status("Please insert an audio disc in the cdrom drive...");
@@ -1863,8 +1863,10 @@ static bool refresh(int force)
 	SET_MAIN_TEXT("album_artist", "Unknown Artist");
 	SET_MAIN_TEXT("album_title", "Unknown Album");
 	update_tracklist(disc);
-	if (!g_prefs->do_cddb_updates && !force)
+	if (!g_prefs->do_cddb_updates && !force) {
+		enable_all_main_widgets();
 		return true;
+	}
 
 	lookup_disc(disc);
 	cddb_disc_destroy(disc);

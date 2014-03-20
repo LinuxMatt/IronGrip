@@ -144,6 +144,12 @@
 
 #define STR_FREE(x) g_free(x);x=NULL
 #define Sleep(x) usleep(x*1000)
+#define SIGNAL_PAUSE 50
+#define THREAD_WAIT (SIGNAL_PAUSE * 2)
+#define REFRESH_INTERVAL 200
+#define INSERT_CD_INTERVAL 700
+#define CD_SCAN_INTERVAL 5000
+#define FS_SCAN_INTERVAL 7000
 
 #define DIALOG_INFO_OK(...) \
 	show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_OK,  __VA_ARGS__)
@@ -1412,7 +1418,7 @@ static bool check_disc()
 											GINT_TO_POINTER(fd), TRUE, NULL);
 		while (g_atomic_int_get(&g_data->ioctl_thread_running) != 0) {
 			GTK_REFRESH;
-			Sleep(100);
+			Sleep(THREAD_WAIT);
 		}
 		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 		close(fd);
@@ -1431,7 +1437,7 @@ static bool check_disc()
 	if (!drive_opened) {
 		set_status("Cannot access cdrom drive (maybe missing, busy, or tray opened).");
 	} else {
-		Sleep(700);
+		Sleep(INSERT_CD_INTERVAL);
 		set_status("Please insert an audio disc in the cdrom drive...");
 		disable_lookup_widgets();
 		if (!alreadyCleared) {
@@ -1570,15 +1576,13 @@ static void lookup_disc(cddb_disc_t *disc)
 
 	// show cddb update window
 	disable_all_main_widgets();
-	GtkLabel *status = GTK_LABEL(LKP_MAIN(WDG_STATUS));
-	gtk_label_set_text(status, _("<b>Getting disc info from the internet...</b>"));
-	gtk_label_set_use_markup(status, TRUE);
+	set_status(_("<b>Getting disc info from the internet...</b>"));
 
 	while (g_atomic_int_get(&g_data->cddb_thread_running) != 0) {
 		GTK_REFRESH;
-		Sleep(200);
+		Sleep(THREAD_WAIT);
 	}
-	gtk_label_set_text(status, "CDDB query finished.");
+	set_status("CDDB query finished.");
 	enable_all_main_widgets();
 
 	cddb_destroy(g_data->cddb_conn);
@@ -1865,9 +1869,9 @@ static bool refresh(int force)
 	update_tracklist(disc);
 	if (!g_prefs->do_cddb_updates && !force) {
 		enable_all_main_widgets();
+		set_gui_action(ACTION_READY, false);
 		return true;
 	}
-
 	lookup_disc(disc);
 	cddb_disc_destroy(disc);
 	if (g_data->disc_matches == NULL) {
@@ -2744,7 +2748,7 @@ static GtkWidget *create_main(void)
 	BOXPACK(vbox1, hbox5, FALSE, TRUE, 5);
 	gtk_widget_show(hbox5);
 
-	GtkWidget *statusLbl = gtk_label_new("Welcome to " PROGRAM_NAME);
+	GtkWidget *statusLbl = gtk_label_new("Welcome to " PROGRAM_NAME " v." VERSION);
 	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
 	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
 	BOXPACK(hbox5, statusLbl, TRUE, TRUE, 0);
@@ -4056,7 +4060,7 @@ static void abort_threads()
 			|| g_data->lame_pid != 0
 			|| g_data->oggenc_pid != 0
 			|| g_data->flac_pid != 0) {
-        Sleep(200);
+        Sleep(THREAD_WAIT);
 		TRACEINFO("cdparanoia=%d lame=%d ogg=%d flac=%d", g_data->cdparanoia_pid,
 						g_data->lame_pid, g_data->oggenc_pid, g_data->flac_pid);
     }
@@ -4067,7 +4071,7 @@ static void abort_threads()
     // gdk_flush();
     g_data->working = false;
     show_completed_dialog();
-    gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
+    gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME " v." VERSION);
     gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
 	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
@@ -4541,7 +4545,6 @@ static void lamehq(int tracknum, char *artist, char *album, char *title,
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->lame_pid);
 	read_from_encoder(LAME, fd);
 	close(fd);
-	Sleep(200);
 	sigchld();
 }
 
@@ -4589,7 +4592,6 @@ static void oggenc(int tracknum, char *artist, char *album, char *title,
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->oggenc_pid);
 	read_from_encoder(OGGENC, fd);
 	close(fd);
-	Sleep(200);
 	sigchld();
 }
 
@@ -4665,7 +4667,6 @@ static void flac(int tracknum, char *artist, char *album, char *title,
 	g_free(title_text);
 	g_free(genre_text);
 	g_free(year_text);
-	Sleep(200);
 	sigchld();
 }
 
@@ -4889,9 +4890,11 @@ static gpointer encode_thread(gpointer data)
 			|| g_data->oggenc_pid != 0
 			|| g_data->flac_pid != 0) {
 		// printf("w2\n");
-		Sleep(200);
+		Sleep(THREAD_WAIT);
 	}
+	// Update progress bar again before AllDone ??
 	TRACEINFO("Waking up to allDone");
+	Sleep(REFRESH_INTERVAL*3);
 	g_data->allDone = true;		// so the tracker thread will exit
 	g_data->working = false;
 	set_gui_action(ACTION_ENCODED, true);
@@ -4925,7 +4928,7 @@ static gpointer track_thread(gpointer data)
 				|| g_data->flac_percent <= 0.0
 				|| g_data->ogg_percent <= 0.0
 				|| g_data->mp3_percent <= 0.0)) {
-			Sleep(200);
+			Sleep(THREAD_WAIT);
 			continue;
 		}
 		started = true;
@@ -4963,7 +4966,7 @@ static gpointer track_thread(gpointer data)
 			g_thread_exit(NULL);
 		}
 		set_gui_action(ACTION_UPDATE_PBAR, false);
-		Sleep(200);
+		Sleep(REFRESH_INTERVAL);
 	}
 	set_gui_action(ACTION_READY, true);
 	TRACEINFO("The End.");
@@ -5111,7 +5114,7 @@ static gboolean cb_gui_update(gpointer data)
 
 		case ACTION_READY:
 			set_status("Ready.");
-			gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
+			gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME " v." VERSION);
 			g_data->action = NO_ACTION;
 			break;
 
@@ -6258,11 +6261,11 @@ int main(int argc, char *argv[])
 	gtk_widget_show(win_main);
 	lookup_cdparanoia();
 	// recurring timeout to automatically re-scan cdrom once in a while
-	gdk_threads_add_timeout(5000, idle, (void *)1);
+	gdk_threads_add_timeout(CD_SCAN_INTERVAL, idle, (void *)1);
 	// add an idle event to scan the cdrom drive ASAP
+	gdk_threads_add_timeout(REFRESH_INTERVAL*2, cb_gui_update, NULL);
+	gdk_threads_add_timeout(FS_SCAN_INTERVAL, gfileinfo_cb, 0);
 	gdk_threads_add_idle(scan_on_startup, NULL);
-	gdk_threads_add_timeout(400, cb_gui_update, NULL);
-	gdk_threads_add_timeout(7000, gfileinfo_cb, 0);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();

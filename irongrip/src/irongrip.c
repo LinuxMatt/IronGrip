@@ -457,10 +457,6 @@ static int strcheck(const char *a, const char *b)
 	}
 }
 
-
-
-
-
 static gboolean stat_file(const char *path) {
 	struct stat sts;
 	if(stat(path,&sts)!=0) {
@@ -3057,8 +3053,9 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	GtkWidget *rip_fast = gtk_check_button_new_with_mnemonic(
-										_("Cdparanoia fast mode"));
+										_("Cdparanoia fast mode (not recommended)"));
 	gtk_widget_show(rip_fast);
+	set_tip(rip_fast, "Disable all data verification and correction features.\nThis is -Z mode in Cdparanoia. See man page.");
 	BOXPACK(wbox, rip_fast, FALSE, FALSE, 4);
 
 	label = gtk_label_new(_("Cdparanoia options"));

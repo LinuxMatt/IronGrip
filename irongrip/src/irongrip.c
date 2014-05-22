@@ -2573,13 +2573,59 @@ static GtkWidget *new_entry()
 	gtk_widget_show(entry);
 	return entry;
 }
-
+static GtkWidget *new_vbox()
+{
+	GtkWidget *vbox = gtk_vbox_new(FALSE, 0);
+	gtk_widget_show(vbox);
+	return vbox;
+}
+static GtkWidget *new_hbox(int padding)
+{
+	GtkWidget *p = gtk_hbox_new(FALSE, padding);
+	gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_checkbox(gchar *text, gboolean show)
+{
+	GtkWidget *p = gtk_check_button_new_with_mnemonic(_(text));
+	if(show) gtk_widget_show(p);
+	return p;
+}
 static void set_tip(GtkWidget *widget, gchar *text)
 {
 	GtkTooltips *tip = gtk_tooltips_new();
 	gtk_tooltips_set_tip(tip, widget, _(text), NULL);
 }
+static GtkWidget *new_button(const gchar* stock_id)
+{
+	GtkWidget *p = gtk_button_new_from_stock(stock_id);
+	GTK_WIDGET_SET_FLAGS(p, GTK_CAN_DEFAULT);
+	gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_frame(gchar *label, GtkWidget *parent, gboolean expand)
+{
+	GtkWidget *p = gtk_frame_new(NULL);
+	gtk_widget_show(p);
+	if(label)
+		gtk_frame_set_label(GTK_FRAME(p), _(label));
 
+	if(!parent) return p;
+	if(expand) {
+		BOXPACK(parent, p, TRUE, TRUE, 0);
+	} else {
+		BOXPACK(parent, p, FALSE, FALSE, 0);
+	}
+	return p;
+}
+static GtkWidget *new_alignment(GtkWidget *frame)
+{
+	GtkWidget *p = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(p);
+	gtk_container_add(GTK_CONTAINER(frame), p);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(p), 1, 1, 8, 8);
+	return p;
+}
 static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -2593,8 +2639,7 @@ static GtkWidget *create_main(void)
 	}
 	gtk_window_set_position(GTK_WINDOW(main_win), GTK_WIN_POS_CENTER);
 
-	GtkWidget *vbox1 = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(vbox1);
+	GtkWidget *vbox1 = new_vbox();
 	gtk_container_add(GTK_CONTAINER(main_win), vbox1);
 
 	GtkWidget *toolbar = gtk_toolbar_new();
@@ -2652,16 +2697,13 @@ static GtkWidget *create_main(void)
 	GtkWidget *albumtitle_label = new_label("Album Title:");
 	gtk_table_attach(tbl, albumtitle_label, 0, 1, 2, 3, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *single_artist = gtk_check_button_new_with_mnemonic(
-														_("Single Artist"));
-	gtk_widget_show(single_artist);
+	GtkWidget *single_artist = new_checkbox("Single Artist", 1);
 	gtk_table_attach(tbl, single_artist, 2, 3, 1, 2, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *genre_label = new_label("Genre / Year:");
 	gtk_table_attach(tbl, genre_label, 0, 1, 3, 4, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *single_genre = gtk_check_button_new_with_mnemonic(
-														_("Single Genre"));
+	GtkWidget *single_genre = new_checkbox("Single Genre", 0);
 	//~ gtk_widget_show(single_genre);
 	//~ gtk_table_attach(GTK_TABLE(table2), single_genre, 2, 3, 3, 4,
 	//~  GTK_FILL, 0, 3, 0);
@@ -2681,8 +2723,7 @@ static GtkWidget *create_main(void)
 	gtk_tree_view_set_rules_hint(tracktree, TRUE);
 	gtk_tree_view_set_enable_search(tracktree, FALSE);
 
-	GtkWidget *rip_box = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(rip_box);
+	GtkWidget *rip_box = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(rip_box), 0);
 	table = gtk_table_new(3, 2, FALSE);
 	gtk_widget_show(table);
@@ -2691,9 +2732,7 @@ static GtkWidget *create_main(void)
 	GtkWidget *progress_rip = ripping_bar(table,"Ripping", 1);
 	GtkWidget *progress_encode = ripping_bar(table,"Encoding", 2);
 
-	GtkWidget *cancel = gtk_button_new_from_stock(GTK_STOCK_CANCEL);
-	gtk_widget_show(cancel);
-	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
+	GtkWidget *cancel = new_button(GTK_STOCK_CANCEL);
 	GtkWidget *alignment_cancel= gtk_alignment_new(0.5, 0.5, 0.4, 1);
 	gtk_widget_show(alignment_cancel);
 	gtk_container_add(GTK_CONTAINER(alignment_cancel), cancel);
@@ -2750,15 +2789,13 @@ static GtkWidget *create_main(void)
 	gtk_cell_layout_set_attributes(disc_layout, cell, STR_TEXT, 1, NULL);
 
 	// Bottom HBOX
-	GtkWidget *hbox5 = gtk_hbox_new(FALSE, 5);
+	GtkWidget *hbox5 = new_hbox(0);
 	BOXPACK(vbox1, hbox5, FALSE, TRUE, 5);
-	gtk_widget_show(hbox5);
 
-	GtkWidget *statusLbl = gtk_label_new("Welcome to " PROGRAM_NAME " v." VERSION);
+	GtkWidget *statusLbl = new_label("Welcome to " PROGRAM_NAME " v." VERSION);
 	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
 	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
 	BOXPACK(hbox5, statusLbl, TRUE, TRUE, 0);
-	gtk_widget_show(statusLbl);
 
 	CONNECT_SIGNAL(main_win, "delete_event", on_window_close);
 	CONNECT_SIGNAL(tracklist, "button-press-event", on_tracklist_clicked);
@@ -2849,17 +2886,15 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *wbox = NULL;
 
 	/* GENERAL tab */
-	vbox = gtk_vbox_new(FALSE, 5);
+	vbox = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	GtkWidget *label = new_label("Destination folder");
 	BOXPACK(vbox, label, FALSE, FALSE, 0);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
-	GtkWidget *hbox = gtk_hbox_new(FALSE, 3);
-	gtk_widget_show(hbox);
+	GtkWidget *hbox = new_hbox(0);
 	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
 	GtkWidget *music_folder = new_entry();
 	BOXPACK(hbox, music_folder, TRUE, TRUE, 0);
@@ -2871,58 +2906,40 @@ static GtkWidget *create_prefs(void)
 	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
 	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
 
-	hbox = gtk_hbox_new(FALSE, 4);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(vbox, hbox, FALSE, FALSE, 2);
-	GtkWidget *space = gtk_label_new(_("Free space:"));
-	gtk_widget_show(space);
+	GtkWidget *space = new_label(_("Free space:"));
 	BOXPACK(hbox, space, FALSE, FALSE, 4);
-	GtkWidget *fslabel = gtk_label_new("(Not Available)");
-	gtk_widget_show(fslabel);
+	GtkWidget *fslabel = new_label("(Not Available)");
 	BOXPACK(hbox, fslabel, FALSE, FALSE, 4);
 	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
 
-	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
-													_("Create M3U playlist"));
-	gtk_widget_show(make_m3u);
+	GtkWidget *make_m3u = new_checkbox("Create M3U playlist", 1);
 	BOXPACK(vbox, make_m3u, FALSE, FALSE, 6);
 
-	GtkWidget *always_overwrite = gtk_check_button_new_with_mnemonic(
-										_("Always overwrite output files"));
-	gtk_widget_show(always_overwrite);
+	GtkWidget *always_overwrite = new_checkbox("Always overwrite output files", 1);
 	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 2);
 
-	GtkWidget *use_notify = gtk_check_button_new_with_mnemonic(
-					_("Display desktop notifications"));
-	gtk_widget_show(use_notify);
+	GtkWidget *use_notify = new_checkbox("Display desktop notifications", 1);
 	set_tip(use_notify, "This feature requires 'libnotify'.");
 	BOXPACK(vbox, use_notify, FALSE, FALSE, 2);
 
-	GtkWidget *mb_lookup = gtk_check_button_new_with_mnemonic(
-				_("Enable IronSeek engine (very experimental!)"));
-	gtk_widget_show(mb_lookup);
+	GtkWidget *mb_lookup = new_checkbox("Enable IronSeek engine (very experimental!)", 1);
 	set_tip(mb_lookup, "Look up into MusicBrainz for metadata and covers.");
 	BOXPACK(vbox, mb_lookup, FALSE, FALSE, 2);
 
-	label = gtk_label_new(_("General"));
-	gtk_widget_show(label);
+	label = new_label(_("General"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, GENERAL_TAB), label);
 	/* END GENERAL tab */
 
-
 	/* FILENAMES tab */
-	vbox = gtk_vbox_new(FALSE, 5);
+	vbox = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	vbox = gtk_vbox_new(FALSE, 0);
+	frame = new_frame(0,vbox,0);
+	vbox = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(frame), vbox);
 
 	label = new_label("%A - Artist\n"
@@ -2970,40 +2987,28 @@ static GtkWidget *create_prefs(void)
 	label = new_label("\nTip: use lowercase letters for simplified names.");
 	BOXPACK(vbox, label, FALSE, FALSE, 0);
 
-	label = gtk_label_new(_("Filename formats"));
-	gtk_widget_show(label);
+	label = new_label(_("Filename formats"));
 	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
-	label = gtk_label_new(_("Filenames"));
-	gtk_widget_show(label);
+	label = new_label(_("Filenames"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, FILENAMES_TAB), label);
 	/* END FILENAMES tab */
 
 	/* DRIVES tab */
-	vbox = gtk_vbox_new(FALSE, 5);
+	vbox = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
-
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-	wbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(wbox);
+	frame = new_frame(0, vbox, 0);
+	alignment = new_alignment(frame);
+	wbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	/* CDROM drives */
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
-	label = gtk_label_new(_("CD-ROM drives: "));
-	gtk_widget_show(label);
+	label = new_label(_("CD-ROM drives: "));
 	BOXPACK(hbox, label, FALSE, FALSE, 0);
 
 	GtkWidget *cdrom_drives = gtk_combo_box_new();
@@ -3014,11 +3019,9 @@ static GtkWidget *create_prefs(void)
 	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
 	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
 	// PATH TO DEVICE
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
-	label = gtk_label_new(_("Path to device: "));
-	gtk_widget_show(label);
+	label = new_label(_("Path to device: "));
 	BOXPACK(hbox, label, FALSE, FALSE, 0);
 
 	GtkWidget *cdrom = new_entry();
@@ -3030,106 +3033,69 @@ static GtkWidget *create_prefs(void)
 
 	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
 
-	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(
-											_("Eject disc when finished"));
-	gtk_widget_show(eject_on_done);
+	GtkWidget *eject_on_done = new_checkbox("Eject disc when finished", 1);
 	BOXPACK(wbox, eject_on_done, FALSE, FALSE, 4);
 
-	label = gtk_label_new(_("Device"));
-	gtk_widget_show(label);
+	label = new_label(_("Device"));
 	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 	/* END of CDROM drives */
 
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-	wbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(wbox);
+	frame = new_frame(0, vbox, 0);
+	alignment = new_alignment(frame);
+	wbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
-	GtkWidget *rip_fast = gtk_check_button_new_with_mnemonic(
-										_("Cdparanoia fast mode (not recommended)"));
-	gtk_widget_show(rip_fast);
+	GtkWidget *rip_fast = new_checkbox("Cdparanoia fast mode (not recommended)", 1);
 	set_tip(rip_fast, "Disable all data verification and correction features.\nThis is -Z mode in Cdparanoia. See man page.");
 	BOXPACK(wbox, rip_fast, FALSE, FALSE, 4);
 
-	label = gtk_label_new(_("Cdparanoia options"));
-	gtk_widget_show(label);
+	label = new_label(_("Cdparanoia options"));
 	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
 	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
-	label = gtk_label_new(_("Audio CD"));
-	gtk_widget_show(label);
+	label = new_label(_("Audio CD"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, DRIVES_TAB), label);
 	/* END DRIVES tab */
 
 	/* ENCODE tab */
-	vbox = gtk_vbox_new(FALSE, 0);
+	vbox = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	/* WAV */
-	frame = gtk_frame_new(NULL);
-	gtk_frame_set_label(GTK_FRAME(frame), _("Lossless formats"));
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-	wbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(wbox);
+	frame = new_frame("Lossless formats", vbox, 0);
+	alignment = new_alignment(frame);
+	wbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
-
-	GtkWidget *rip_wav = gtk_check_button_new_with_label(
-										_("WAVE (uncompressed)"));
-	gtk_widget_show(rip_wav);
-	BOXPACK(wbox, rip_wav, FALSE, FALSE, 0);
+	GtkWidget *rip_wav = new_checkbox("WAVE (uncompressed)", 1);
 	set_tip(rip_wav, "Original sound quality, big size.");
+	BOXPACK(wbox, rip_wav, FALSE, FALSE, 0);
 	/* END WAV */
 
 	/* FLAC */
-	GtkWidget *rip_flac = gtk_check_button_new_with_label(_("FLAC (compressed)"));
-	gtk_widget_show(rip_flac);
-	BOXPACK(wbox, rip_flac, FALSE, FALSE, 0);
+	GtkWidget *rip_flac = new_checkbox("FLAC (compressed)", 1);
 	set_tip(rip_flac, "Original sound quality, smaller size.");
+	BOXPACK(wbox, rip_flac, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(rip_flac, "toggled", on_rip_flac_toggled);
 	/* END FLAC */
 
 	/* MP3 */
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-
-	wbox = gtk_vbox_new(FALSE, 6);
-	gtk_widget_show(wbox);
+	frame = new_frame(0, vbox, 0);
+	alignment = new_alignment(frame);
+	wbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
-	GtkWidget *mp3_vbr = gtk_check_button_new_with_mnemonic(
-											_("Variable bit rate (VBR)"));
-	gtk_widget_show(mp3_vbr);
+	GtkWidget *mp3_vbr = new_checkbox("Variable bit rate (VBR)", 1);
+	set_tip(mp3_vbr, "Better quality for the same size.");
 	BOXPACK(wbox, mp3_vbr, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_vbr, "toggled", on_vbr_toggled);
-	set_tip(mp3_vbr, "Better quality for the same size.");
 
-	GtkWidget *hboxcombo = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hboxcombo);
+	GtkWidget *hboxcombo = new_hbox(0);
 	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
 
-	GtkWidget *quality_label = gtk_label_new(_("Quality : "));
-	gtk_widget_show(quality_label);
+	GtkWidget *quality_label = new_label(_("Quality : "));
 	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
 	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_MP3);
 
@@ -3146,50 +3112,35 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(hboxcombo, mp3_quality, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_quality, "changed", on_mp3_quality_changed);
 
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
 
-	GtkWidget *bitrate_label = gtk_label_new(_("Bitrate : "));
-	gtk_widget_show(bitrate_label);
+	GtkWidget *bitrate_label = new_label(_("Bitrate : "));
 	BOXPACK(hbox, bitrate_label, FALSE, FALSE, 0);
 	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
 
 	int rate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
 	gchar *kbps = g_strdup_printf(_("%dKbps"), rate);
-	label = gtk_label_new(kbps);
-	gtk_widget_show(label);
+	label = new_label(kbps);
 	g_free(kbps);
 	BOXPACK(hbox, label, FALSE, FALSE, 0);
 	HOOKUP(prefs, label, WDG_BITRATE);
 
-	GtkWidget *rip_mp3 = gtk_check_button_new_with_mnemonic(
-												_("MP3 (lossy compression)"));
-	gtk_widget_show(rip_mp3);
+	GtkWidget *rip_mp3 = new_checkbox("MP3 (lossy compression)", 1);
 	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
 	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
 	/* END MP3 */
 
 	// OGG
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-
-	wbox = gtk_vbox_new(FALSE, 6);
-	gtk_widget_show(wbox);
+	frame = new_frame(0, vbox, 0);
+	alignment = new_alignment(frame);
+	wbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
-	hboxcombo = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hboxcombo);
+	hboxcombo = new_hbox(0);
 	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
 
-	quality_label = gtk_label_new(_("Quality : "));
-	gtk_widget_show(quality_label);
+	quality_label = new_label(_("Quality : "));
 	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
 	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_OGG);
 
@@ -3201,111 +3152,83 @@ static GtkWidget *create_prefs(void)
 	gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
 	gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
 
-	GtkWidget *rip_ogg = gtk_check_button_new_with_mnemonic (_("OGG Vorbis (lossy compression)"));
-	gtk_widget_show (rip_ogg);
+	GtkWidget *rip_ogg = new_checkbox("OGG Vorbis (lossy compression)", 1);
 	gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
 	CONNECT_SIGNAL(rip_ogg, "toggled", on_rip_ogg_toggled);
 	// END OGG
 
-	label = gtk_label_new(_("Encode"));
-	gtk_widget_show(label);
+	label = new_label(_("Encode"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, ENCODE_TAB), label);
 	/* END ENCODE tab */
 
 
 	/* ADVANCED tab */
-	vbox = gtk_vbox_new(FALSE, 5);
+	vbox = new_vbox();
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
-	frame = gtk_frame_new(NULL);
-	gtk_frame_set_label(GTK_FRAME(frame), "CDDB");
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	GtkWidget *frameVbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(frameVbox);
+	frame = new_frame("CDDB", vbox, 0);
+	GtkWidget *frameVbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
-	GtkWidget *do_cddb_updates = gtk_check_button_new_with_mnemonic(
-						_("Get disc info from the internet automatically"));
-	gtk_widget_show(do_cddb_updates);
+	GtkWidget *do_cddb_updates = new_checkbox("Get disc info from the internet automatically", 1);
 	BOXPACK(frameVbox, do_cddb_updates, FALSE, FALSE, 0);
 
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
-	label = gtk_label_new(_("Server: "));
-	gtk_widget_show(label);
+	label = new_label(_("Server: "));
 	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *cddbServerName = new_entry();
-	BOXPACK(hbox, cddbServerName, TRUE, TRUE, 5);
-
 	set_tip(cddbServerName, "The CDDB server to get disc info from"
 							   " (default is freedb.freedb.org)");
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	BOXPACK(hbox, cddbServerName, TRUE, TRUE, 5);
+
+	hbox = new_hbox(0);
 	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
-	label = gtk_label_new(_("Port: "));
-	gtk_widget_show(label);
+	label = new_label(_("Port: "));
 	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *cddbPortNum = new_entry();
 	BOXPACK(hbox, cddbPortNum, TRUE, TRUE, 5);
 	set_tip(cddbPortNum, "The CDDB server port (default is 8880)");
 
-	GtkWidget *cddb_nocache = gtk_check_button_new_with_label(
-											_("Disable CDDB local cache"));
-	gtk_widget_show(cddb_nocache);
+	GtkWidget *cddb_nocache = new_checkbox("Disable CDDB local cache", 1);
 	BOXPACK(frameVbox, cddb_nocache, FALSE, FALSE, 0);
 
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	GtkWidget *useProxy = gtk_check_button_new_with_mnemonic(
-							_("Use an HTTP proxy to connect to the internet"));
-	gtk_widget_show(useProxy);
+	frame = new_frame(0, vbox, 0);
+	GtkWidget *useProxy = new_checkbox("Use an HTTP proxy to connect to the internet", 1);
 	gtk_frame_set_label_widget(GTK_FRAME(frame), useProxy);
 
-	frameVbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(frameVbox);
+	frameVbox = new_vbox();
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
-	label = gtk_label_new(_("Server: "));
-	gtk_widget_show(label);
+	label = new_label(_("Server: "));
 	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *serverName = new_entry();
 	BOXPACK(hbox, serverName, TRUE, TRUE, 5);
 
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
+	hbox = new_hbox(0);
 	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
 
-	label = gtk_label_new(_("Port: "));
-	gtk_widget_show(label);
+	label = new_label(_("Port: "));
 	BOXPACK(hbox, label, FALSE, FALSE, 5);
 
 	GtkWidget *portNum = new_entry();
 	BOXPACK(hbox, portNum, TRUE, TRUE, 5);
 
 	gchar *lbl = g_strdup_printf("Log to %s", g_prefs->log_file);
-	GtkWidget *log_file = gtk_check_button_new_with_label(lbl);
-	gtk_widget_show(log_file);
+	GtkWidget *log_file = new_checkbox(lbl, 1);
 	BOXPACK(vbox, log_file, FALSE, FALSE, 0);
 	g_free(lbl);
 
-	label = gtk_label_new(_("Advanced"));
-	gtk_widget_show(label);
+	label = new_label(_("Advanced"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, ADVANCED_TAB), label);
 	/* END ADVANCED tab */
 
@@ -3313,15 +3236,11 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(action_area);
 	gtk_button_box_set_layout(GTK_BUTTON_BOX(action_area), GTK_BUTTONBOX_END);
 
-	GtkWidget *cancel = gtk_button_new_from_stock(GTK_STOCK_CANCEL);
-	gtk_widget_show(cancel);
+	GtkWidget *cancel = new_button(GTK_STOCK_CANCEL);
 	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), cancel, GTK_RESPONSE_CANCEL);
-	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
 
-	GtkWidget *ok = gtk_button_new_from_stock(GTK_STOCK_OK);
-	gtk_widget_show(ok);
+	GtkWidget *ok = new_button(GTK_STOCK_OK);
 	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), ok, GTK_RESPONSE_OK);
-	GTK_WIDGET_SET_FLAGS(ok, GTK_CAN_DEFAULT);
 
 	CONNECT_SIGNAL(prefs, "response", on_prefs_response);
 	CONNECT_SIGNAL(prefs, "realize", on_prefs_show);
@@ -3360,8 +3279,7 @@ static GtkWidget *create_prefs(void)
 
 static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
 	GtkTable *t = GTK_TABLE(table);
-	GtkWidget *label = gtk_label_new(_(name));
-	gtk_widget_show(label);
+	GtkWidget *label = new_label(_(name));
 	gtk_table_attach(t, label, 0, 1, y, y+1, GTK_FILL, 0, 5, 10);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	GtkWidget *progress = gtk_progress_bar_new();
@@ -3965,14 +3883,11 @@ static bool confirmOverwrite(const char *pathAndName)
 
 	gchar *m = g_strdup_printf(_("The file '%s' already exists."
 								" Do you want to overwrite it?\n"), lastSlash);
-	GtkWidget *label = gtk_label_new(m);
+	GtkWidget *label = new_label(m);
 	g_free(m);
-	gtk_widget_show(label);
 	BOXPACK(GTK_DIALOG(dialog)->vbox, label, TRUE, TRUE, 0);
 
-	GtkWidget *checkbox = gtk_check_button_new_with_mnemonic(
-			_("Remember the answer for _all the files made from this CD"));
-	gtk_widget_show(checkbox);
+	GtkWidget *checkbox = new_checkbox("Remember the answer for _all the files made from this CD", 1);
 	BOXPACK(GTK_DIALOG(dialog)->vbox, checkbox, TRUE, TRUE, 0);
 
 	int rc = gtk_dialog_run(GTK_DIALOG(dialog));
@@ -5566,7 +5481,7 @@ static void *CurlFetch(size_t *size, const char *urlFmt, ...)
 	ce_setopt(ch, CO_URL, buf);
 	ce_setopt(ch, CO_WRITEFUNCTION, curlCallback);
 	ce_setopt(ch, CO_WRITEDATA, (void *) &cfdata);
-	ce_setopt(ch, CO_USERAGENT, "irongrip/0.8");
+	ce_setopt(ch, CO_USERAGENT, "irongrip/0.9");
 	ce_setopt(ch, CO_FAILONERROR, 1);
 	/*
 	ce_setopt(ch, CO_VERBOSE, 1);

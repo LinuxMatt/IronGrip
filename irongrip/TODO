@@ -18,11 +18,9 @@ Normal priority:
 Lower priority:
 ---------------
 * Fetch images from http://www.discogs.com/viewimages?release=id
-* Add tooltips on options in preferences
 * Add experimental option : 'Download cover art' (requires libcurl)
 * .cddbslave multiple matches not working (bug in libcddb)
 * when cdrom drive is changed in preferences, scan again asap
-* Use libnotify
 * Enable logging on console (stderr)
 * use --best for flac compression (-8 is still equivalent)
 * Fix log output format
@@ -45,3 +43,6 @@ https://wiki.ubuntu.com/DebuggingProgramCrash#Debug_Symbol_Packages
 * Fixed: when CDDB lookup is OFF, GUI does not refresh on 2nd Audio disc.
 * Remove annoying 'reading disc contents' message
 * Fix progress bar not always going to 100% when job is finished.
+* Use libnotify when available
+* Add tooltips on options in preferences
+

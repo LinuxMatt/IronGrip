@@ -2569,6 +2569,12 @@ static GtkWidget *new_label(gchar *text)
 	gtk_label_set_use_markup(GTK_LABEL(p), TRUE);
 	return p;
 }
+static GtkWidget *new_label_pack(GtkWidget *parent, int pad, gchar *text)
+{
+	GtkWidget *p = new_label(text);
+	BOXPACK(parent, p, FALSE, FALSE, pad);
+	return p;
+}
 static GtkWidget *new_entry()
 {
 	GtkWidget *p = gtk_entry_new();
@@ -2597,6 +2603,12 @@ static GtkWidget *new_hbox(int padding)
 {
 	GtkWidget *p = gtk_hbox_new(FALSE, padding);
 	gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_hbox_pack(GtkWidget *parent, int pad)
+{
+	GtkWidget *p = new_hbox(0);
+	BOXPACK(parent, p, FALSE, FALSE, pad);
 	return p;
 }
 static GtkWidget *new_checkbox(gchar *text, gboolean show)
@@ -2635,6 +2647,13 @@ static GtkWidget *new_alignment(GtkWidget *frame)
 	gtk_alignment_set_padding(GTK_ALIGNMENT(p), 1, 1, 8, 8);
 	return p;
 }
+static void set_tab_label(GtkWidget *notebook, int tabindex, gchar *text)
+{
+	GtkNotebook *tabs = GTK_NOTEBOOK(notebook);
+	gtk_notebook_set_tab_label(tabs,
+			gtk_notebook_get_nth_page(tabs, tabindex), new_label(text));
+}
+
 static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -2879,14 +2898,12 @@ static GtkWidget *create_prefs(void)
 	gtk_window_set_title(GTK_WINDOW(prefs), _("Preferences"));
 	gtk_window_set_modal(GTK_WINDOW(prefs), TRUE);
 	gtk_window_set_type_hint(GTK_WINDOW(prefs), GDK_WINDOW_TYPE_HINT_DIALOG);
-
 	GtkWidget *vbox = GTK_DIALOG(prefs)->vbox;
 	gtk_widget_show(vbox);
 
-	GtkWidget *notebook1 = gtk_notebook_new();
-	GtkNotebook *tabs = GTK_NOTEBOOK(notebook1);
-	gtk_widget_show(notebook1);
-	BOXPACK(vbox, notebook1, TRUE, TRUE, 0);
+	GtkWidget *notebook = gtk_notebook_new();
+	gtk_widget_show(notebook);
+	BOXPACK(vbox, notebook, TRUE, TRUE, 0);
 
 	GtkWidget *frame = NULL;
 	GtkWidget *alignment = NULL;
@@ -2894,35 +2911,31 @@ static GtkWidget *create_prefs(void)
 
 	/* GENERAL tab */
 	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
+	gtk_container_add(GTK_CONTAINER(notebook), vbox);
 
-	GtkWidget *label = new_label("Destination folder");
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
+	GtkWidget *label = new_label_pack(vbox, 0, "Destination folder");
 
-	GtkWidget *hbox = new_hbox(0);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
-	GtkWidget *music_folder = new_entry();
+	GtkWidget *hbox = new_hbox_pack(vbox, 0);
+
+	GtkWidget *music_folder = new_entry_with_tip("Location of encoded files.");
 	BOXPACK(hbox, music_folder, TRUE, TRUE, 0);
 
 	GtkWidget *folder_btn =  gtk_button_new_with_label(" ... ");
 	gtk_widget_show(folder_btn);
 	set_tip(folder_btn, "Choose another folder");
-
 	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
 	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
 
-	hbox = new_hbox(0);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 2);
-	GtkWidget *space = new_label(_("Free space:"));
-	BOXPACK(hbox, space, FALSE, FALSE, 4);
-	GtkWidget *fslabel = new_label("(Not Available)");
-	BOXPACK(hbox, fslabel, FALSE, FALSE, 4);
+	hbox = new_hbox_pack(vbox, 2);
+	new_label_pack(hbox, 4, "Free space:");
+	GtkWidget *fslabel = new_label_pack(hbox, 4, "(Not Available)");
 	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
 
 	GtkWidget *make_m3u = new_checkbox("Create M3U playlist", 1);
 	BOXPACK(vbox, make_m3u, FALSE, FALSE, 6);
 
 	GtkWidget *always_overwrite = new_checkbox("Always overwrite output files", 1);
+	set_tip(always_overwrite, "Do not display confirmation dialog.");
 	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 2);
 
 	GtkWidget *use_notify = new_checkbox("Display desktop notifications", 1);
@@ -2934,27 +2947,24 @@ static GtkWidget *create_prefs(void)
 	set_tip(mb_lookup, "Look up into MusicBrainz for metadata and covers.");
 	BOXPACK(vbox, mb_lookup, FALSE, FALSE, 2);
 
-	label = new_label(_("General"));
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, GENERAL_TAB), label);
+	set_tab_label(notebook, GENERAL_TAB, "General");
 	/* END GENERAL tab */
 
 	/* FILENAMES tab */
 	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
+	gtk_container_add(GTK_CONTAINER(notebook), vbox);
 
-	frame = new_frame(0,vbox,0);
+	frame = new_frame("Filename formats",vbox,0);
 	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), vbox);
 
-	label = new_label("%A - Artist\n"
-						"%L - Album\n"
+	new_label_pack(vbox, 0, "%A - Artist\t"
+						"%L - Album\t"
+						"%G - Genre\n"
+						"%T - Song title\n"
 						"%N - Track number (2-digit)\n"
 						"%Y - Year (4-digit or \"0\")\n"
-						"%T - Song title");
-
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
-	label = new_label("%G - Genre");
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
+						);
 
 	GtkWidget *table1 = gtk_table_new(3, 2, FALSE);
 	GtkTable *t = GTK_TABLE(table1);
@@ -2985,30 +2995,21 @@ static GtkWidget *create_prefs(void)
 	gtk_table_attach(t, fmt_playlist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
 	gtk_table_attach(t, fmt_music,    1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
 
-	label = new_label("\nTip: use lowercase letters for simplified names.");
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
-
-	label = new_label(_("Filename formats"));
-	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
-
-	label = new_label(_("Filenames"));
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, FILENAMES_TAB), label);
+	new_label_pack(vbox, 0, "\nTip: use lowercase letters for simplified names.");
+	set_tab_label(notebook, FILENAMES_TAB, "Filenames");
 	/* END FILENAMES tab */
 
 	/* DRIVES tab */
 	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
-
-	frame = new_frame(0, vbox, 0);
+	gtk_container_add(GTK_CONTAINER(notebook), vbox);
+	frame = new_frame("Device", vbox, 0);
 	alignment = new_alignment(frame);
 	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	/* CDROM drives */
-	hbox = new_hbox(0);
-	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
-	label = new_label(_("CD-ROM drives: "));
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
+	hbox = new_hbox_pack(wbox, 0);
+	new_label_pack(hbox, 0, "CD-ROM drives: ");
 
 	GtkWidget *cdrom_drives = gtk_combo_box_new();
 	gtk_widget_show(cdrom_drives);
@@ -3018,28 +3019,22 @@ static GtkWidget *create_prefs(void)
 	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
 	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
 	// PATH TO DEVICE
-	hbox = new_hbox(0);
-	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
-	label = new_label(_("Path to device: "));
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
+	hbox = new_hbox_pack(wbox, 0);
+	new_label_pack(hbox, 0, "Path to device: ");
 
-	GtkWidget *cdrom = new_entry();
+	GtkWidget *cdrom = new_entry_with_tip(
+					"Default: /dev/cdrom\n"
+					"Other example: /dev/hdc\n" "Other example: /dev/sr0");
 	gtk_widget_set_sensitive(cdrom, FALSE);
 	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
-	set_tip(cdrom, "Default: /dev/cdrom\n"
-			"Other example: /dev/hdc\n" "Other example: /dev/sr0");
 	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
-
 	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
 
 	GtkWidget *eject_on_done = new_checkbox("Eject disc when finished", 1);
 	BOXPACK(wbox, eject_on_done, FALSE, FALSE, 4);
-
-	label = new_label(_("Device"));
-	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
 	/* END of CDROM drives */
 
-	frame = new_frame(0, vbox, 0);
+	frame = new_frame("Cdparanoia options", vbox, 0);
 	alignment = new_alignment(frame);
 	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
@@ -3048,16 +3043,12 @@ static GtkWidget *create_prefs(void)
 	set_tip(rip_fast, "Disable all data verification and correction features.\nThis is -Z mode in Cdparanoia. See man page.");
 	BOXPACK(wbox, rip_fast, FALSE, FALSE, 4);
 
-	label = new_label(_("Cdparanoia options"));
-	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
-
-	label = new_label(_("Audio CD"));
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, DRIVES_TAB), label);
+	set_tab_label(notebook, DRIVES_TAB, "Audio CD");
 	/* END DRIVES tab */
 
 	/* ENCODE tab */
 	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
+	gtk_container_add(GTK_CONTAINER(notebook), vbox);
 
 	/* WAV */
 	frame = new_frame("Lossless formats", vbox, 0);
@@ -3091,11 +3082,9 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(wbox, mp3_vbr, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_vbr, "toggled", on_vbr_toggled);
 
-	GtkWidget *hboxcombo = new_hbox(0);
-	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
+	GtkWidget *hboxcombo = new_hbox_pack(wbox, 1);
 
-	GtkWidget *quality_label = new_label(_("Quality : "));
-	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
+	GtkWidget *quality_label = new_label_pack(hboxcombo, 0, "Quality : ");
 	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_MP3);
 
 	GtkWidget *mp3_quality = gtk_combo_box_new_text();
@@ -3111,20 +3100,16 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(hboxcombo, mp3_quality, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_quality, "changed", on_mp3_quality_changed);
 
-	hbox = new_hbox(0);
-	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
+	hbox = new_hbox_pack(wbox, 0);
 
-	GtkWidget *bitrate_label = new_label(_("Bitrate : "));
-	BOXPACK(hbox, bitrate_label, FALSE, FALSE, 0);
+	GtkWidget *bitrate_label = new_label_pack(hbox, 0, "Bitrate : ");
 	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
 
 	int rate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
 	gchar *kbps = g_strdup_printf(_("%dKbps"), rate);
-	label = new_label(kbps);
-	g_free(kbps);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
+	label = new_label_pack(hbox, 0, kbps);
 	HOOKUP(prefs, label, WDG_BITRATE);
-
+	g_free(kbps);
 	/* END MP3 */
 
 	// OGG
@@ -3133,34 +3118,29 @@ static GtkWidget *create_prefs(void)
 	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
-	hboxcombo = new_hbox(0);
-	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
+	hboxcombo = new_hbox_pack(wbox, 1);
 
-	quality_label = new_label(_("Quality : "));
-	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
+	quality_label = new_label_pack(hboxcombo, 0, "Quality : ");
 	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_OGG);
 
 	GtkWidget *ogg_quality = gtk_hscale_new (GTK_ADJUSTMENT (gtk_adjustment_new (6, 0, 11, 1, 1, 1)));
 	gtk_widget_show (ogg_quality);
 	set_tip(ogg_quality, "Higher quality means bigger file. Default is 7 (recommended).");
-
-	BOXPACK(hboxcombo, ogg_quality, TRUE, TRUE, 0);
 	gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
 	gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
+	BOXPACK(hboxcombo, ogg_quality, TRUE, TRUE, 0);
 
 	GtkWidget *rip_ogg = new_checkbox("OGG Vorbis (lossy compression)", 1);
 	gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
 	CONNECT_SIGNAL(rip_ogg, "toggled", on_rip_ogg_toggled);
 	// END OGG
 
-	label = new_label(_("Encode"));
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, ENCODE_TAB), label);
+	set_tab_label(notebook, ENCODE_TAB, "Encode");
 	/* END ENCODE tab */
-
 
 	/* ADVANCED tab */
 	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
+	gtk_container_add(GTK_CONTAINER(notebook), vbox);
 
 	frame = new_frame("CDDB", vbox, 0);
 	GtkWidget *frameVbox = new_vbox(0);
@@ -3169,26 +3149,20 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *do_cddb_updates = new_checkbox("Get disc info from the internet automatically", 1);
 	BOXPACK(frameVbox, do_cddb_updates, FALSE, FALSE, 0);
 
-	hbox = new_hbox(0);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
+	hbox = new_hbox_pack(frameVbox, 1);
+	new_label_pack(hbox, 5, "Server: ");
 
-	label = new_label(_("Server: "));
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *cddbServerName = new_entry();
-	set_tip(cddbServerName, "The CDDB server to get disc info from"
-							   " (default is freedb.freedb.org)");
+	GtkWidget *cddbServerName = new_entry_with_tip(
+									"The CDDB server to get disc info from"
+									" (default is freedb.freedb.org)");
 	BOXPACK(hbox, cddbServerName, TRUE, TRUE, 5);
 
-	hbox = new_hbox(0);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
+	hbox = new_hbox_pack(frameVbox, 1);
+	new_label_pack(hbox, 5, "Port: ");
 
-	label = new_label(_("Port: "));
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *cddbPortNum = new_entry();
+	GtkWidget *cddbPortNum = new_entry_with_tip(
+									"The CDDB server port (default is 8880)");
 	BOXPACK(hbox, cddbPortNum, TRUE, TRUE, 5);
-	set_tip(cddbPortNum, "The CDDB server port (default is 8880)");
 
 	GtkWidget *cddb_nocache = new_checkbox("Disable CDDB local cache", 1);
 	BOXPACK(frameVbox, cddb_nocache, FALSE, FALSE, 0);
@@ -3200,22 +3174,16 @@ static GtkWidget *create_prefs(void)
 	frameVbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
-	hbox = new_hbox(0);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
+	hbox = new_hbox_pack(frameVbox, 1);
+	new_label_pack(hbox, 5, "Server: ");
 
-	label = new_label(_("Server: "));
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *serverName = new_entry();
+	GtkWidget *serverName = new_entry_with_tip("Proxy server address");
 	BOXPACK(hbox, serverName, TRUE, TRUE, 5);
 
-	hbox = new_hbox(0);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
+	hbox = new_hbox_pack(frameVbox, 1);
+	new_label_pack(hbox, 5, "Port: ");
 
-	label = new_label(_("Port: "));
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *portNum = new_entry();
+	GtkWidget *portNum = new_entry_with_tip("Proxy server port number");
 	BOXPACK(hbox, portNum, TRUE, TRUE, 5);
 
 	gchar *lbl = g_strdup_printf("Log to %s", g_prefs->log_file);
@@ -3223,8 +3191,7 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(vbox, log_file, FALSE, FALSE, 0);
 	g_free(lbl);
 
-	label = new_label(_("Advanced"));
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, ADVANCED_TAB), label);
+	set_tab_label(notebook, ADVANCED_TAB, "Advanced");
 	/* END ADVANCED tab */
 
 	GtkWidget *action_area = GTK_DIALOG(prefs)->action_area;
@@ -3274,7 +3241,7 @@ static GtkWidget *create_prefs(void)
 
 static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
 	GtkTable *t = GTK_TABLE(table);
-	GtkWidget *label = new_label(_(name));
+	GtkWidget *label = new_label(name);
 	gtk_table_attach(t, label, 0, 1, y, y+1, GTK_FILL, 0, 5, 10);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	GtkWidget *progress = gtk_progress_bar_new();
@@ -3878,9 +3845,8 @@ static bool confirmOverwrite(const char *pathAndName)
 
 	gchar *m = g_strdup_printf(_("The file '%s' already exists."
 								" Do you want to overwrite it?\n"), lastSlash);
-	GtkWidget *label = new_label(m);
+	BOXPACK(GTK_DIALOG(dialog)->vbox, new_label(m), TRUE, TRUE, 0);
 	g_free(m);
-	BOXPACK(GTK_DIALOG(dialog)->vbox, label, TRUE, TRUE, 0);
 
 	GtkWidget *checkbox = new_checkbox("Remember the answer for _all the files made from this CD", 1);
 	BOXPACK(GTK_DIALOG(dialog)->vbox, checkbox, TRUE, TRUE, 0);

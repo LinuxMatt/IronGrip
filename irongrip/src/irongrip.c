@@ -232,7 +232,6 @@ enum {
 enum { FLAC, LAME, OGGENC };
 
 #define SZENTRY 256
-
 static void szcopy(char dst[SZENTRY], const gchar *src)
 {
 	memset(dst,0,SZENTRY);
@@ -300,6 +299,7 @@ typedef struct _shared {
 	bool overwriteNone;
 	bool trace;
 	bool working; // ripping or encoding
+    bool has_notify;
 	cddb_conn_t *cddb_conn;
 	cddb_disc_t *cddb_disc;
 	double mp3_percent;
@@ -400,8 +400,6 @@ typedef struct {
 } mbresult_t;
 
 #define M_ArrayElem(a) (sizeof(a) / sizeof(a[1]))
-
-
 
 // Global objects
 static GtkWidget *win_main = NULL;
@@ -1307,7 +1305,12 @@ static int notify(char *message)
 	int ret = 0;
 	int version = 0;
 	void *h = get_notify_lib(&version);
-	if(!h) return ret;
+	if(!h) {
+		g_data->has_notify = false;
+		return ret;
+	}
+	g_data->has_notify = true;
+	if(!g_prefs->use_notify) return 0;
 	FMAP(ntf_init_t,"notify_init",nn_init);
 	FMAP(ntf_new_t,"notify_notification_new",nn_new);
 	FMAP(ntf_set_timeout_t,"notify_notification_set_timeout",nn_st);
@@ -2558,26 +2561,37 @@ static GtkWidget *new_separator(GtkWidget *toolbar, gboolean expand)
 	gtk_container_add(GTK_CONTAINER(toolbar), sep);
 	return sep;
 }
-
 static GtkWidget *new_label(gchar *text)
 {
-	GtkWidget *label = gtk_label_new(_(text));
-	gtk_widget_show(label);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-	return label;
+	GtkWidget *p = gtk_label_new(_(text));
+	gtk_widget_show(p);
+	gtk_misc_set_alignment(GTK_MISC(p), 0, 0);
+	gtk_label_set_use_markup(GTK_LABEL(p), TRUE);
+	return p;
 }
-
 static GtkWidget *new_entry()
 {
-	GtkWidget *entry = gtk_entry_new();
-	gtk_widget_show(entry);
-	return entry;
+	GtkWidget *p = gtk_entry_new();
+	gtk_widget_show(p);
+	return p;
 }
-static GtkWidget *new_vbox()
+static void set_tip(GtkWidget *widget, gchar *text)
 {
-	GtkWidget *vbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(vbox);
-	return vbox;
+	GtkTooltips *tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, widget, _(text), NULL);
+}
+static GtkWidget *new_entry_with_tip(gchar *tip)
+{
+	GtkWidget *p = new_entry();
+	set_tip(p, tip);
+	return p;
+}
+static GtkWidget *new_vbox(int border_width)
+{
+	GtkWidget *p = gtk_vbox_new(FALSE, 0);
+	gtk_container_set_border_width(GTK_CONTAINER(p), border_width+2);
+	gtk_widget_show(p);
+	return p;
 }
 static GtkWidget *new_hbox(int padding)
 {
@@ -2590,11 +2604,6 @@ static GtkWidget *new_checkbox(gchar *text, gboolean show)
 	GtkWidget *p = gtk_check_button_new_with_mnemonic(_(text));
 	if(show) gtk_widget_show(p);
 	return p;
-}
-static void set_tip(GtkWidget *widget, gchar *text)
-{
-	GtkTooltips *tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, widget, _(text), NULL);
 }
 static GtkWidget *new_button(const gchar* stock_id)
 {
@@ -2639,7 +2648,7 @@ static GtkWidget *create_main(void)
 	}
 	gtk_window_set_position(GTK_WINDOW(main_win), GTK_WIN_POS_CENTER);
 
-	GtkWidget *vbox1 = new_vbox();
+	GtkWidget *vbox1 = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(main_win), vbox1);
 
 	GtkWidget *toolbar = gtk_toolbar_new();
@@ -2723,8 +2732,7 @@ static GtkWidget *create_main(void)
 	gtk_tree_view_set_rules_hint(tracktree, TRUE);
 	gtk_tree_view_set_enable_search(tracktree, FALSE);
 
-	GtkWidget *rip_box = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(rip_box), 0);
+	GtkWidget *rip_box = new_vbox(0);
 	table = gtk_table_new(3, 2, FALSE);
 	gtk_widget_show(table);
 	BOXPACK(rip_box, table, FALSE, FALSE, 0);
@@ -2793,7 +2801,6 @@ static GtkWidget *create_main(void)
 	BOXPACK(vbox1, hbox5, FALSE, TRUE, 5);
 
 	GtkWidget *statusLbl = new_label("Welcome to " PROGRAM_NAME " v." VERSION);
-	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
 	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
 	BOXPACK(hbox5, statusLbl, TRUE, TRUE, 0);
 
@@ -2886,13 +2893,11 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *wbox = NULL;
 
 	/* GENERAL tab */
-	vbox = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	GtkWidget *label = new_label("Destination folder");
 	BOXPACK(vbox, label, FALSE, FALSE, 0);
-	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
 	GtkWidget *hbox = new_hbox(0);
 	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
@@ -2923,6 +2928,7 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *use_notify = new_checkbox("Display desktop notifications", 1);
 	set_tip(use_notify, "This feature requires 'libnotify'.");
 	BOXPACK(vbox, use_notify, FALSE, FALSE, 2);
+	if(!g_data->has_notify) gtk_widget_set_sensitive(use_notify, FALSE);
 
 	GtkWidget *mb_lookup = new_checkbox("Enable IronSeek engine (very experimental!)", 1);
 	set_tip(mb_lookup, "Look up into MusicBrainz for metadata and covers.");
@@ -2933,13 +2939,11 @@ static GtkWidget *create_prefs(void)
 	/* END GENERAL tab */
 
 	/* FILENAMES tab */
-	vbox = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	frame = new_frame(0,vbox,0);
-	vbox = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), vbox);
 
 	label = new_label("%A - Artist\n"
@@ -2957,52 +2961,47 @@ static GtkWidget *create_prefs(void)
 	gtk_widget_show(table1);
 	BOXPACK(vbox, table1, TRUE, TRUE, 0);
 
-	label = new_label("Album directory: ");
-	gtk_table_attach(t, label, 0, 1, 0, 1, GTK_FILL, 0, 0, 0);
+	GtkWidget *lbl_albumdir = new_label("Album directory: ");
+	GtkWidget *fmt_albumdir = new_entry_with_tip(
+			"This is relative to the destination folder"
+			" (from the General tab).\n" "Can be blank.\n"
+			"Default: %A - %L\n" "Other example: %A/%L");
 
-	label = new_label("Playlist file: ");
-	gtk_table_attach(t, label, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
+	GtkWidget *lbl_playlist = new_label("Playlist file: ");
+	GtkWidget *fmt_playlist = new_entry_with_tip(
+			"This will be stored in the album directory.\n"
+			"Can be blank.\n" "Default: %A - %L");
 
-	label = new_label("Music file: ");
-	gtk_table_attach(t, label, 0, 1, 2, 3, GTK_FILL, 0, 0, 0);
+	GtkWidget *lbl_music = new_label("Music file: ");
+	GtkWidget *fmt_music = new_entry_with_tip(
+			"This will be stored in the album directory.\n"
+			"Cannot be blank.\n" "Default: %A - %T\n"
+			"Other example: %N - %T");
 
-	GtkWidget *fmt_albumdir = new_entry();
+	gtk_table_attach(t, lbl_albumdir, 0, 1, 0, 1, GTK_FILL, 0, 0, 0);
+	gtk_table_attach(t, lbl_playlist, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
+	gtk_table_attach(t, lbl_music,    0, 1, 2, 3, GTK_FILL, 0, 0, 0);
 	gtk_table_attach(t, fmt_albumdir, 1, 2, 0, 1, GTK_EXPAND_FILL, 0, 0, 0);
-
-	set_tip(fmt_albumdir,
-		"This is relative to the destination folder (from the General tab).\n"
-		"Can be blank.\n" "Default: %A - %L\n" "Other example: %A/%L");
-
-	GtkWidget *fmt_playlist = new_entry();
 	gtk_table_attach(t, fmt_playlist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
-	set_tip(fmt_playlist, "This will be stored in the album directory.\n"
-							"Can be blank.\n" "Default: %A - %L");
-
-	GtkWidget *fmt_music = new_entry();
-	gtk_table_attach(t, fmt_music, 1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
-	set_tip(fmt_music, "This will be stored in the album directory.\n"
-							"Cannot be blank.\n" "Default: %A - %T\n"
-							"Other example: %N - %T");
+	gtk_table_attach(t, fmt_music,    1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
 
 	label = new_label("\nTip: use lowercase letters for simplified names.");
 	BOXPACK(vbox, label, FALSE, FALSE, 0);
 
 	label = new_label(_("Filename formats"));
 	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
-	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
 	label = new_label(_("Filenames"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, FILENAMES_TAB), label);
 	/* END FILENAMES tab */
 
 	/* DRIVES tab */
-	vbox = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	frame = new_frame(0, vbox, 0);
 	alignment = new_alignment(frame);
-	wbox = new_vbox();
+	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	/* CDROM drives */
@@ -3038,12 +3037,11 @@ static GtkWidget *create_prefs(void)
 
 	label = new_label(_("Device"));
 	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
-	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 	/* END of CDROM drives */
 
 	frame = new_frame(0, vbox, 0);
 	alignment = new_alignment(frame);
-	wbox = new_vbox();
+	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	GtkWidget *rip_fast = new_checkbox("Cdparanoia fast mode (not recommended)", 1);
@@ -3052,21 +3050,19 @@ static GtkWidget *create_prefs(void)
 
 	label = new_label(_("Cdparanoia options"));
 	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
-	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
 
 	label = new_label(_("Audio CD"));
 	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, DRIVES_TAB), label);
 	/* END DRIVES tab */
 
 	/* ENCODE tab */
-	vbox = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	/* WAV */
 	frame = new_frame("Lossless formats", vbox, 0);
 	alignment = new_alignment(frame);
-	wbox = new_vbox();
+	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	GtkWidget *rip_wav = new_checkbox("WAVE (uncompressed)", 1);
@@ -3084,7 +3080,10 @@ static GtkWidget *create_prefs(void)
 	/* MP3 */
 	frame = new_frame(0, vbox, 0);
 	alignment = new_alignment(frame);
-	wbox = new_vbox();
+	GtkWidget *rip_mp3 = new_checkbox("MP3 (lossy compression)", 1);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
+	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
+	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	GtkWidget *mp3_vbr = new_checkbox("Variable bit rate (VBR)", 1);
@@ -3126,15 +3125,12 @@ static GtkWidget *create_prefs(void)
 	BOXPACK(hbox, label, FALSE, FALSE, 0);
 	HOOKUP(prefs, label, WDG_BITRATE);
 
-	GtkWidget *rip_mp3 = new_checkbox("MP3 (lossy compression)", 1);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
-	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
 	/* END MP3 */
 
 	// OGG
 	frame = new_frame(0, vbox, 0);
 	alignment = new_alignment(frame);
-	wbox = new_vbox();
+	wbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	hboxcombo = new_hbox(0);
@@ -3163,12 +3159,11 @@ static GtkWidget *create_prefs(void)
 
 
 	/* ADVANCED tab */
-	vbox = new_vbox();
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
+	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
 
 	frame = new_frame("CDDB", vbox, 0);
-	GtkWidget *frameVbox = new_vbox();
+	GtkWidget *frameVbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
 	GtkWidget *do_cddb_updates = new_checkbox("Get disc info from the internet automatically", 1);
@@ -3202,7 +3197,7 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *useProxy = new_checkbox("Use an HTTP proxy to connect to the internet", 1);
 	gtk_frame_set_label_widget(GTK_FRAME(frame), useProxy);
 
-	frameVbox = new_vbox();
+	frameVbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
 	hbox = new_hbox(0);
@@ -6115,6 +6110,8 @@ int main(int argc, char *argv[])
 	g_data->updated = g_cond_new();
 	g_data->monolock = g_mutex_new();
 	g_data->guilock = g_mutex_new();
+	int version = 0;
+	if(get_notify_lib(&version)) g_data->has_notify = true;
 	load_prefs();
 	log_init();
 #ifdef ENABLE_NLS

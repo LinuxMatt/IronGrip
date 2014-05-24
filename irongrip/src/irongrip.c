@@ -1484,8 +1484,8 @@ static GtkTreeModel *create_model_from_disc(cddb_disc_t *disc)
 					   COL_TRACKNUM, number,
 					   COL_TRACKARTIST, artist,
 					   COL_TRACKTITLE, title,
-					   COL_TRACKTIME, time,
 					   COL_GENRE, cddb_disc_get_genre(disc),
+					   COL_TRACKTIME, time,
 					   COL_YEAR, year_str, -1);
 	}
 	return GTK_TREE_MODEL(store);
@@ -2653,7 +2653,21 @@ static void set_tab_label(GtkWidget *notebook, int tabindex, gchar *text)
 	gtk_notebook_set_tab_label(tabs,
 			gtk_notebook_get_nth_page(tabs, tabindex), new_label(text));
 }
+static GtkWidget *new_table(GtkWidget *parent, int cols, int rows, GtkWidget **items)
+{
+	GtkWidget *p = gtk_table_new(rows, cols, FALSE);
+	gtk_widget_show(p);
+	BOXPACK(parent, p, TRUE, TRUE, 0);
 
+	GtkTable *t = GTK_TABLE(p);
+	for(int i=0; i<rows; i++) {
+		for(int j=0; j<cols; j++) {
+			gtk_table_attach(t, *items++, j, j+1, i, i+1,
+				  (j+1==cols) ? GTK_EXPAND_FILL : GTK_FILL, 0, 0, 0);
+		}
+	}
+	return p;
+}
 static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -2694,7 +2708,7 @@ static GtkWidget *create_main(void)
 	new_separator(toolbar, TRUE);
 	GtkWidget *about = new_button_with_icon(toolbar, GTK_STOCK_ABOUT, NULL, NULL);
 
-	GtkWidget *table = gtk_table_new(3, 3, FALSE);
+	GtkWidget *table = gtk_table_new(4, 3, FALSE);
 	gtk_widget_show(table);
 	BOXPACK(vbox1, table, FALSE, TRUE, 3);
 
@@ -2732,9 +2746,7 @@ static GtkWidget *create_main(void)
 	gtk_table_attach(tbl, genre_label, 0, 1, 3, 4, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *single_genre = new_checkbox("Single Genre", 0);
-	//~ gtk_widget_show(single_genre);
-	//~ gtk_table_attach(GTK_TABLE(table2), single_genre, 2, 3, 3, 4,
-	//~  GTK_FILL, 0, 3, 0);
+	gtk_table_attach(tbl, single_genre, 2, 3, 2, 3, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *album_year = new_entry();
 	gtk_table_attach(tbl, album_year, 2, 3, 3, 4, GTK_FILL, 0, 3, 0);
@@ -2777,13 +2789,21 @@ static GtkWidget *create_main(void)
 	gtk_tree_view_insert_column_with_attributes(\
 			GTK_TREE_VIEW(tracklist), -1, text, cell, type, column, NULL)
 
-	GtkCellRenderer *cell = NULL;
-	cell = gtk_cell_renderer_toggle_new();
+	GtkCellRenderer *cell = gtk_cell_renderer_toggle_new();
 	g_object_set(cell, "activatable", TRUE, NULL);
 	CONNECT_SIGNAL(cell, "toggled", on_rip_toggled);
 	TRACK_INSERT(_("Rip"), "active", COL_RIPTRACK);
 	GtkTreeViewColumn *col = gtk_tree_view_get_column(tracktree, COL_RIPTRACK);
 	gtk_tree_view_column_set_clickable(col, TRUE);
+
+	/*COL_RIPTRACK,
+    COL_TRACKNUM,
+    COL_TRACKARTIST,
+    COL_TRACKTITLE,
+    COL_GENRE,
+    COL_TRACKTIME,
+    COL_YEAR,
+	*/
 
 	cell = gtk_cell_renderer_text_new();
 	TRACK_INSERT(_("Track"), STR_TEXT, COL_TRACKNUM);
@@ -2914,12 +2934,10 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(notebook), vbox);
 
 	GtkWidget *label = new_label_pack(vbox, 0, "Destination folder");
-
 	GtkWidget *hbox = new_hbox_pack(vbox, 0);
 
 	GtkWidget *music_folder = new_entry_with_tip("Location of encoded files.");
 	BOXPACK(hbox, music_folder, TRUE, TRUE, 0);
-
 	GtkWidget *folder_btn =  gtk_button_new_with_label(" ... ");
 	gtk_widget_show(folder_btn);
 	set_tip(folder_btn, "Choose another folder");
@@ -2932,7 +2950,7 @@ static GtkWidget *create_prefs(void)
 	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
 
 	GtkWidget *make_m3u = new_checkbox("Create M3U playlist", 1);
-	BOXPACK(vbox, make_m3u, FALSE, FALSE, 6);
+	BOXPACK(vbox, make_m3u, FALSE, FALSE, 4);
 
 	GtkWidget *always_overwrite = new_checkbox("Always overwrite output files", 1);
 	set_tip(always_overwrite, "Do not display confirmation dialog.");
@@ -2953,23 +2971,14 @@ static GtkWidget *create_prefs(void)
 	/* FILENAMES tab */
 	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-
 	frame = new_frame("Filename formats",vbox,0);
 	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), vbox);
 
-	new_label_pack(vbox, 0, "%A - Artist\t"
-						"%L - Album\t"
-						"%G - Genre\n"
+	new_label_pack(vbox, 0, "%A - Artist\t" "%L - Album\t" "%G - Genre\n"
 						"%T - Song title\n"
 						"%N - Track number (2-digit)\n"
-						"%Y - Year (4-digit or \"0\")\n"
-						);
-
-	GtkWidget *table1 = gtk_table_new(3, 2, FALSE);
-	GtkTable *t = GTK_TABLE(table1);
-	gtk_widget_show(table1);
-	BOXPACK(vbox, table1, TRUE, TRUE, 0);
+						"%Y - Year (4-digit or \"0\")\n");
 
 	GtkWidget *lbl_albumdir = new_label("Album directory: ");
 	GtkWidget *fmt_albumdir = new_entry_with_tip(
@@ -2988,13 +2997,9 @@ static GtkWidget *create_prefs(void)
 			"Cannot be blank.\n" "Default: %A - %T\n"
 			"Other example: %N - %T");
 
-	gtk_table_attach(t, lbl_albumdir, 0, 1, 0, 1, GTK_FILL, 0, 0, 0);
-	gtk_table_attach(t, lbl_playlist, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
-	gtk_table_attach(t, lbl_music,    0, 1, 2, 3, GTK_FILL, 0, 0, 0);
-	gtk_table_attach(t, fmt_albumdir, 1, 2, 0, 1, GTK_EXPAND_FILL, 0, 0, 0);
-	gtk_table_attach(t, fmt_playlist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
-	gtk_table_attach(t, fmt_music,    1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
-
+	GtkWidget *items[] = { lbl_albumdir, fmt_albumdir, lbl_music, fmt_music,
+						 lbl_playlist, fmt_playlist };
+	new_table(vbox, 2, 3, items);
 	new_label_pack(vbox, 0, "\nTip: use lowercase letters for simplified names.");
 	set_tab_label(notebook, FILENAMES_TAB, "Filenames");
 	/* END FILENAMES tab */
@@ -3008,27 +3013,21 @@ static GtkWidget *create_prefs(void)
 	gtk_container_add(GTK_CONTAINER(alignment), wbox);
 
 	/* CDROM drives */
-	hbox = new_hbox_pack(wbox, 0);
-	new_label_pack(hbox, 0, "CD-ROM drives: ");
-
 	GtkWidget *cdrom_drives = gtk_combo_box_new();
 	gtk_widget_show(cdrom_drives);
-	BOXPACK(hbox, cdrom_drives, TRUE, TRUE, 0);
 	GtkCellRenderer *p_cell = gtk_cell_renderer_text_new();
 	GtkCellLayout *layout = GTK_CELL_LAYOUT(cdrom_drives);
 	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
 	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
-	// PATH TO DEVICE
-	hbox = new_hbox_pack(wbox, 0);
-	new_label_pack(hbox, 0, "Path to device: ");
-
-	GtkWidget *cdrom = new_entry_with_tip(
-					"Default: /dev/cdrom\n"
+	GtkWidget *cdrom = new_entry_with_tip("Default: /dev/cdrom\n"
 					"Other example: /dev/hdc\n" "Other example: /dev/sr0");
 	gtk_widget_set_sensitive(cdrom, FALSE);
-	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
 	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
 	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
+
+	GtkWidget *cells[] = { new_label("CD-ROM drives:"), cdrom_drives,
+							new_label("Path to device:"), cdrom };
+	new_table(wbox, 2, 2, cells);
 
 	GtkWidget *eject_on_done = new_checkbox("Eject disc when finished", 1);
 	BOXPACK(wbox, eject_on_done, FALSE, FALSE, 4);
@@ -3141,7 +3140,6 @@ static GtkWidget *create_prefs(void)
 	/* ADVANCED tab */
 	vbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-
 	frame = new_frame("CDDB", vbox, 0);
 	GtkWidget *frameVbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
@@ -3149,20 +3147,16 @@ static GtkWidget *create_prefs(void)
 	GtkWidget *do_cddb_updates = new_checkbox("Get disc info from the internet automatically", 1);
 	BOXPACK(frameVbox, do_cddb_updates, FALSE, FALSE, 0);
 
-	hbox = new_hbox_pack(frameVbox, 1);
-	new_label_pack(hbox, 5, "Server: ");
-
 	GtkWidget *cddbServerName = new_entry_with_tip(
 									"The CDDB server to get disc info from"
 									" (default is freedb.freedb.org)");
-	BOXPACK(hbox, cddbServerName, TRUE, TRUE, 5);
-
-	hbox = new_hbox_pack(frameVbox, 1);
-	new_label_pack(hbox, 5, "Port: ");
 
 	GtkWidget *cddbPortNum = new_entry_with_tip(
 									"The CDDB server port (default is 8880)");
-	BOXPACK(hbox, cddbPortNum, TRUE, TRUE, 5);
+
+	GtkWidget *cddb_items[] = { new_label("Server:"), cddbServerName,
+								new_label("Port:"), cddbPortNum };
+	new_table(frameVbox, 2, 2, cddb_items);
 
 	GtkWidget *cddb_nocache = new_checkbox("Disable CDDB local cache", 1);
 	BOXPACK(frameVbox, cddb_nocache, FALSE, FALSE, 0);
@@ -3174,17 +3168,11 @@ static GtkWidget *create_prefs(void)
 	frameVbox = new_vbox(0);
 	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
 
-	hbox = new_hbox_pack(frameVbox, 1);
-	new_label_pack(hbox, 5, "Server: ");
-
 	GtkWidget *serverName = new_entry_with_tip("Proxy server address");
-	BOXPACK(hbox, serverName, TRUE, TRUE, 5);
-
-	hbox = new_hbox_pack(frameVbox, 1);
-	new_label_pack(hbox, 5, "Port: ");
-
 	GtkWidget *portNum = new_entry_with_tip("Proxy server port number");
-	BOXPACK(hbox, portNum, TRUE, TRUE, 5);
+	GtkWidget *proxy_items[] = { new_label("Proxy server:"), serverName,
+								new_label("Proxy port:"), portNum };
+	new_table(frameVbox, 2, 2, proxy_items);
 
 	gchar *lbl = g_strdup_printf("Log to %s", g_prefs->log_file);
 	GtkWidget *log_file = new_checkbox(lbl, 1);

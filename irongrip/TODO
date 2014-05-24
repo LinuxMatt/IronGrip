@@ -3,6 +3,7 @@ TODO
 
 Bugs:
 -----
+* Editing 'Genre' columns does not work with '%G' format
 
 Features for v1.x:
 -----------------

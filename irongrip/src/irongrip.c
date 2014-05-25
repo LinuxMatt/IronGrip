@@ -2617,6 +2617,12 @@ static GtkWidget *new_checkbox(gchar *text, gboolean show)
 	if(show) gtk_widget_show(p);
 	return p;
 }
+static GtkWidget *new_checkbox_pack(GtkWidget *parent, gchar *text, int pad)
+{
+	GtkWidget *p = new_checkbox(text, 1);
+	BOXPACK(parent, p, FALSE, FALSE, pad);
+	return p;
+}
 static GtkWidget *new_button(const gchar* stock_id)
 {
 	GtkWidget *p = gtk_button_new_from_stock(stock_id);
@@ -2639,6 +2645,22 @@ static GtkWidget *new_frame(gchar *label, GtkWidget *parent, gboolean expand)
 	}
 	return p;
 }
+static GtkWidget *new_vframe(GtkWidget *parent, gchar *text)
+{
+	GtkWidget *frame = new_frame(text, parent, 0);
+	GtkWidget *p = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(frame), p);
+	return p;
+}
+static GtkWidget *new_cframe(GtkWidget *parent, GtkWidget *checkbox)
+{
+	GtkWidget *frame = new_frame(NULL, parent, 0);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), checkbox);
+	GtkWidget *p = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(frame), p);
+	return p;
+}
+/*
 static GtkWidget *new_alignment(GtkWidget *frame)
 {
 	GtkWidget *p = gtk_alignment_new(0.5, 0.5, 1, 1);
@@ -2647,11 +2669,11 @@ static GtkWidget *new_alignment(GtkWidget *frame)
 	gtk_alignment_set_padding(GTK_ALIGNMENT(p), 1, 1, 8, 8);
 	return p;
 }
-static void set_tab_label(GtkWidget *notebook, int tabindex, gchar *text)
+*/
+static void append_tab(GtkWidget *notebook, GtkWidget *child, gchar *text)
 {
-	GtkNotebook *tabs = GTK_NOTEBOOK(notebook);
-	gtk_notebook_set_tab_label(tabs,
-			gtk_notebook_get_nth_page(tabs, tabindex), new_label(text));
+	GtkNotebook *book = GTK_NOTEBOOK(notebook);
+	gtk_notebook_append_page(book, child, new_label(text));
 }
 static GtkWidget *new_table(GtkWidget *parent, int cols, int rows, GtkWidget **items)
 {
@@ -2663,9 +2685,18 @@ static GtkWidget *new_table(GtkWidget *parent, int cols, int rows, GtkWidget **i
 	for(int i=0; i<rows; i++) {
 		for(int j=0; j<cols; j++) {
 			gtk_table_attach(t, *items++, j, j+1, i, i+1,
-				  (j+1==cols) ? GTK_EXPAND_FILL : GTK_FILL, 0, 0, 0);
+				  (j+1==cols) ? GTK_EXPAND_FILL : GTK_FILL, 0, 3, 1);
 		}
 	}
+	return p;
+}
+static GtkWidget *new_hscale(GtkWidget *parent, int min, int max)
+{
+	GtkWidget *p = gtk_hscale_new(GTK_ADJUSTMENT(gtk_adjustment_new(0, min, max+1, 1, 1, 1)));
+	gtk_widget_show (p);
+	gtk_scale_set_value_pos(GTK_SCALE(p), GTK_POS_RIGHT);
+	gtk_scale_set_digits(GTK_SCALE(p), 0);
+	BOXPACK(parent, p, TRUE, TRUE, 0);
 	return p;
 }
 static GtkWidget *create_main(void)
@@ -2729,20 +2760,20 @@ static GtkWidget *create_main(void)
 	create_completion(album_genre, WDG_ALBUM_GENRE);
 	gtk_table_attach(tbl, album_genre, 1, 2, 3, 4, GTK_EXPAND_FILL, 0, 0, 0);
 
-	GtkWidget *disc = gtk_label_new(_("Disc:"));
+	GtkWidget *disc = gtk_label_new(_("Disc :"));
 	gtk_table_attach(tbl, disc, 0, 1, 0, 1, GTK_FILL, 0, 3, 0);
 	gtk_misc_set_alignment(GTK_MISC(disc), 0, 0.49);
 
-	GtkWidget *artist_label = new_label("Album Artist:");
+	GtkWidget *artist_label = new_label("Album Artist :");
 	gtk_table_attach(tbl, artist_label, 0, 1, 1, 2, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *albumtitle_label = new_label("Album Title:");
+	GtkWidget *albumtitle_label = new_label("Album Title :");
 	gtk_table_attach(tbl, albumtitle_label, 0, 1, 2, 3, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *single_artist = new_checkbox("Single Artist", 1);
 	gtk_table_attach(tbl, single_artist, 2, 3, 1, 2, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *genre_label = new_label("Genre / Year:");
+	GtkWidget *genre_label = new_label("Genre / Year :");
 	gtk_table_attach(tbl, genre_label, 0, 1, 3, 4, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *single_genre = new_checkbox("Single Genre", 0);
@@ -2795,15 +2826,6 @@ static GtkWidget *create_main(void)
 	TRACK_INSERT(_("Rip"), "active", COL_RIPTRACK);
 	GtkTreeViewColumn *col = gtk_tree_view_get_column(tracktree, COL_RIPTRACK);
 	gtk_tree_view_column_set_clickable(col, TRUE);
-
-	/*COL_RIPTRACK,
-    COL_TRACKNUM,
-    COL_TRACKARTIST,
-    COL_TRACKTITLE,
-    COL_GENRE,
-    COL_TRACKTIME,
-    COL_YEAR,
-	*/
 
 	cell = gtk_cell_renderer_text_new();
 	TRACK_INSERT(_("Track"), STR_TEXT, COL_TRACKNUM);
@@ -2911,319 +2933,228 @@ static GtkWidget *create_main(void)
 
 static GtkWidget *create_prefs(void)
 {
-	enum {GENERAL_TAB, FILENAMES_TAB,DRIVES_TAB, ENCODE_TAB, ADVANCED_TAB};
+	pWdg vbox = NULL;
+	pWdg wbox = NULL;
 
-	GtkWidget *prefs = gtk_dialog_new();
-	gtk_window_set_transient_for(GTK_WINDOW(prefs), GTK_WINDOW(win_main));
-	gtk_window_set_title(GTK_WINDOW(prefs), _("Preferences"));
-	gtk_window_set_modal(GTK_WINDOW(prefs), TRUE);
-	gtk_window_set_type_hint(GTK_WINDOW(prefs), GDK_WINDOW_TYPE_HINT_DIALOG);
-	GtkWidget *vbox = GTK_DIALOG(prefs)->vbox;
-	gtk_widget_show(vbox);
-
-	GtkWidget *notebook = gtk_notebook_new();
-	gtk_widget_show(notebook);
-	BOXPACK(vbox, notebook, TRUE, TRUE, 0);
-
-	GtkWidget *frame = NULL;
-	GtkWidget *alignment = NULL;
-	GtkWidget *wbox = NULL;
+	enum {GENERAL_TAB, FILENAMES_TAB, DRIVES_TAB, ENCODE_TAB, ADVANCED_TAB,
+			N_PREFS_TABS};
+	pWdg tab[N_PREFS_TABS];
 
 	/* GENERAL tab */
-	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-
-	GtkWidget *label = new_label_pack(vbox, 0, "Destination folder");
-	GtkWidget *hbox = new_hbox_pack(vbox, 0);
-
-	GtkWidget *music_folder = new_entry_with_tip("Location of encoded files.");
+	vbox = tab[GENERAL_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "Destination folder");
+	pWdg hbox = new_hbox_pack(wbox, 0);
+	pWdg music_folder = new_entry_with_tip("Location of encoded files.");
 	BOXPACK(hbox, music_folder, TRUE, TRUE, 0);
-	GtkWidget *folder_btn =  gtk_button_new_with_label(" ... ");
+	pWdg folder_btn =  gtk_button_new_with_label(" ... ");
 	gtk_widget_show(folder_btn);
 	set_tip(folder_btn, "Choose another folder");
 	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
 	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
-
-	hbox = new_hbox_pack(vbox, 2);
-	new_label_pack(hbox, 4, "Free space:");
-	GtkWidget *fslabel = new_label_pack(hbox, 4, "(Not Available)");
-	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
-
-	GtkWidget *make_m3u = new_checkbox("Create M3U playlist", 1);
-	BOXPACK(vbox, make_m3u, FALSE, FALSE, 4);
-
-	GtkWidget *always_overwrite = new_checkbox("Always overwrite output files", 1);
+	hbox = new_hbox_pack(wbox, 2);
+	new_label_pack(hbox, 4, "Free space :");
+	pWdg fslabel = new_label_pack(hbox, 4, "(Not Available)");
+	pWdg make_m3u = new_checkbox_pack(vbox, "Create M3U playlist", 3);
+	pWdg always_overwrite = new_checkbox_pack(vbox, "Always overwrite output files", 3);
 	set_tip(always_overwrite, "Do not display confirmation dialog.");
-	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 2);
-
-	GtkWidget *use_notify = new_checkbox("Display desktop notifications", 1);
+	pWdg use_notify = new_checkbox_pack(vbox, "Display desktop notifications", 2);
 	set_tip(use_notify, "This feature requires 'libnotify'.");
-	BOXPACK(vbox, use_notify, FALSE, FALSE, 2);
 	if(!g_data->has_notify) gtk_widget_set_sensitive(use_notify, FALSE);
-
-	GtkWidget *mb_lookup = new_checkbox("Enable IronSeek engine (very experimental!)", 1);
+	pWdg mb_lookup = new_checkbox_pack(vbox, "Enable IronSeek engine (very experimental!)", 2);
 	set_tip(mb_lookup, "Look up into MusicBrainz for metadata and covers.");
-	BOXPACK(vbox, mb_lookup, FALSE, FALSE, 2);
-
-	set_tab_label(notebook, GENERAL_TAB, "General");
 	/* END GENERAL tab */
 
 	/* FILENAMES tab */
-	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-	frame = new_frame("Filename formats",vbox,0);
-	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(frame), vbox);
+	vbox = tab[FILENAMES_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "Filename formats");
 
-	new_label_pack(vbox, 0, "%A - Artist\t" "%L - Album\t" "%G - Genre\n"
+	new_label_pack(wbox, 0, "%A - Artist\t" "%L - Album\t" "%G - Genre\n"
 						"%T - Song title\n"
 						"%N - Track number (2-digit)\n"
 						"%Y - Year (4-digit or \"0\")\n");
 
-	GtkWidget *lbl_albumdir = new_label("Album directory: ");
-	GtkWidget *fmt_albumdir = new_entry_with_tip(
-			"This is relative to the destination folder"
-			" (from the General tab).\n" "Can be blank.\n"
+	pWdg lbl_albumdir = new_label("Album directory :");
+	pWdg fmt_albumdir = new_entry_with_tip(
+			"This is relative to the destination folder\n"
+			" (from the General tab)." " Can be blank.\n"
 			"Default: %A - %L\n" "Other example: %A/%L");
 
-	GtkWidget *lbl_playlist = new_label("Playlist file: ");
-	GtkWidget *fmt_playlist = new_entry_with_tip(
+	pWdg lbl_playlist = new_label("Playlist file :");
+	pWdg fmt_playlist = new_entry_with_tip(
 			"This will be stored in the album directory.\n"
 			"Can be blank.\n" "Default: %A - %L");
 
-	GtkWidget *lbl_music = new_label("Music file: ");
-	GtkWidget *fmt_music = new_entry_with_tip(
+	pWdg lbl_music = new_label("Music file :");
+	pWdg fmt_music = new_entry_with_tip(
 			"This will be stored in the album directory.\n"
 			"Cannot be blank.\n" "Default: %A - %T\n"
 			"Other example: %N - %T");
 
-	GtkWidget *items[] = { lbl_albumdir, fmt_albumdir, lbl_music, fmt_music,
+	pWdg items[] = { lbl_albumdir, fmt_albumdir, lbl_music, fmt_music,
 						 lbl_playlist, fmt_playlist };
-	new_table(vbox, 2, 3, items);
-	new_label_pack(vbox, 0, "\nTip: use lowercase letters for simplified names.");
-	set_tab_label(notebook, FILENAMES_TAB, "Filenames");
+	new_table(wbox, 2, 3, items);
+	new_label_pack(wbox, 0, "\nTip: use lowercase letters for simplified names.");
 	/* END FILENAMES tab */
 
 	/* DRIVES tab */
-	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-	frame = new_frame("Device", vbox, 0);
-	alignment = new_alignment(frame);
-	wbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
+	vbox = tab[DRIVES_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "Device");
 	/* CDROM drives */
-	GtkWidget *cdrom_drives = gtk_combo_box_new();
+	pWdg cdrom_drives = gtk_combo_box_new();
 	gtk_widget_show(cdrom_drives);
 	GtkCellRenderer *p_cell = gtk_cell_renderer_text_new();
 	GtkCellLayout *layout = GTK_CELL_LAYOUT(cdrom_drives);
 	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
 	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
-	GtkWidget *cdrom = new_entry_with_tip("Default: /dev/cdrom\n"
+	pWdg cdrom = new_entry_with_tip("Default: /dev/cdrom\n"
 					"Other example: /dev/hdc\n" "Other example: /dev/sr0");
 	gtk_widget_set_sensitive(cdrom, FALSE);
 	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
 	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
 
-	GtkWidget *cells[] = { new_label("CD-ROM drives:"), cdrom_drives,
-							new_label("Path to device:"), cdrom };
+	pWdg cells[] = { new_label("CD-ROM drives :"), cdrom_drives,
+							new_label("Path to device :"), cdrom };
 	new_table(wbox, 2, 2, cells);
-
-	GtkWidget *eject_on_done = new_checkbox("Eject disc when finished", 1);
-	BOXPACK(wbox, eject_on_done, FALSE, FALSE, 4);
+	pWdg eject_on_done = new_checkbox_pack(wbox, "Eject disc when finished", 4);
 	/* END of CDROM drives */
-
-	frame = new_frame("Cdparanoia options", vbox, 0);
-	alignment = new_alignment(frame);
-	wbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-	GtkWidget *rip_fast = new_checkbox("Cdparanoia fast mode (not recommended)", 1);
+	wbox = new_vframe(vbox, "Cdparanoia options");
+	pWdg rip_fast = new_checkbox_pack(wbox, "Cdparanoia fast mode (not recommended)", 4);
 	set_tip(rip_fast, "Disable all data verification and correction features.\nThis is -Z mode in Cdparanoia. See man page.");
-	BOXPACK(wbox, rip_fast, FALSE, FALSE, 4);
-
-	set_tab_label(notebook, DRIVES_TAB, "Audio CD");
 	/* END DRIVES tab */
 
 	/* ENCODE tab */
-	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-
-	/* WAV */
-	frame = new_frame("Lossless formats", vbox, 0);
-	alignment = new_alignment(frame);
-	wbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-	GtkWidget *rip_wav = new_checkbox("WAVE (uncompressed)", 1);
+	vbox = tab[ENCODE_TAB] = new_vbox(0);
+	/* LOSSLESS: WAV AND FLAC */
+	wbox = new_vframe(vbox, "Lossless formats");
+	pWdg rip_wav = new_checkbox_pack(wbox, "WAVE (uncompressed)", 2);
 	set_tip(rip_wav, "Original sound quality, big size.");
-	BOXPACK(wbox, rip_wav, FALSE, FALSE, 0);
-	/* END WAV */
-
-	/* FLAC */
-	GtkWidget *rip_flac = new_checkbox("FLAC (compressed)", 1);
+	pWdg rip_flac = new_checkbox_pack(wbox, "FLAC (compressed)", 2);
 	set_tip(rip_flac, "Original sound quality, smaller size.");
-	BOXPACK(wbox, rip_flac, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(rip_flac, "toggled", on_rip_flac_toggled);
-	/* END FLAC */
-
 	/* MP3 */
-	frame = new_frame(0, vbox, 0);
-	alignment = new_alignment(frame);
-	GtkWidget *rip_mp3 = new_checkbox("MP3 (lossy compression)", 1);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
+	pWdg rip_mp3 = new_checkbox("MP3 (lossy compression)", 1);
 	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
-	wbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-	GtkWidget *mp3_vbr = new_checkbox("Variable bit rate (VBR)", 1);
+	wbox = new_cframe(vbox, rip_mp3);
+	pWdg mp3_vbr = new_checkbox_pack(wbox, "Variable bit rate (VBR)", 1);
 	set_tip(mp3_vbr, "Better quality for the same size.");
-	BOXPACK(wbox, mp3_vbr, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_vbr, "toggled", on_vbr_toggled);
-
-	GtkWidget *hboxcombo = new_hbox_pack(wbox, 1);
-
-	GtkWidget *quality_label = new_label_pack(hboxcombo, 0, "Quality : ");
-	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_MP3);
-
-	GtkWidget *mp3_quality = gtk_combo_box_new_text();
+	pWdg mp3_quality_lbl = new_label("Quality :");
+	pWdg mp3_quality = gtk_combo_box_new_text();
 	gtk_widget_show(mp3_quality);
 	set_tip(mp3_quality, "Choosing 'High quality' is recommended.");
-
 	GtkComboBox *cmb_mp3 = GTK_COMBO_BOX(mp3_quality);
 	gtk_combo_box_append_text(cmb_mp3, "Low quality");
 	gtk_combo_box_append_text(cmb_mp3, "Good quality");
 	gtk_combo_box_append_text(cmb_mp3, "High quality (recommended)");
 	gtk_combo_box_append_text(cmb_mp3, "Maximum quality");
 	gtk_combo_box_set_active(cmb_mp3, 2);
-	BOXPACK(hboxcombo, mp3_quality, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_quality, "changed", on_mp3_quality_changed);
-
-	hbox = new_hbox_pack(wbox, 0);
-
-	GtkWidget *bitrate_label = new_label_pack(hbox, 0, "Bitrate : ");
-	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
-
+	pWdg bitrate_label = new_label("Bitrate :");
 	int rate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
 	gchar *kbps = g_strdup_printf(_("%dKbps"), rate);
-	label = new_label_pack(hbox, 0, kbps);
-	HOOKUP(prefs, label, WDG_BITRATE);
+	pWdg bitrate_value = new_label(kbps);
 	g_free(kbps);
-	/* END MP3 */
-
+	pWdg m3_items[] = { mp3_quality_lbl, mp3_quality, bitrate_label, bitrate_value };
+	new_table(wbox, 2, 2, m3_items);
 	// OGG
-	frame = new_frame(0, vbox, 0);
-	alignment = new_alignment(frame);
-	wbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-	hboxcombo = new_hbox_pack(wbox, 1);
-
-	quality_label = new_label_pack(hboxcombo, 0, "Quality : ");
-	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_OGG);
-
-	GtkWidget *ogg_quality = gtk_hscale_new (GTK_ADJUSTMENT (gtk_adjustment_new (6, 0, 11, 1, 1, 1)));
-	gtk_widget_show (ogg_quality);
-	set_tip(ogg_quality, "Higher quality means bigger file. Default is 7 (recommended).");
-	gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
-	gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
-	BOXPACK(hboxcombo, ogg_quality, TRUE, TRUE, 0);
-
-	GtkWidget *rip_ogg = new_checkbox("OGG Vorbis (lossy compression)", 1);
-	gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
+	pWdg rip_ogg = new_checkbox("OGG Vorbis (lossy compression)", 1);
 	CONNECT_SIGNAL(rip_ogg, "toggled", on_rip_ogg_toggled);
-	// END OGG
-
-	set_tab_label(notebook, ENCODE_TAB, "Encode");
+	wbox = new_cframe(vbox, rip_ogg);
+	pWdg hboxcombo = new_hbox_pack(wbox, 1);
+	pWdg ogg_quality_lbl = new_label_pack(hboxcombo, 0, "Quality : ");
+	pWdg ogg_quality = new_hscale(hboxcombo, 0, 10);
+	set_tip(ogg_quality, "Higher quality means bigger file. Default is 7 (recommended).");
 	/* END ENCODE tab */
 
 	/* ADVANCED tab */
-	vbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(notebook), vbox);
-	frame = new_frame("CDDB", vbox, 0);
-	GtkWidget *frameVbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
-
-	GtkWidget *do_cddb_updates = new_checkbox("Get disc info from the internet automatically", 1);
-	BOXPACK(frameVbox, do_cddb_updates, FALSE, FALSE, 0);
-
-	GtkWidget *cddbServerName = new_entry_with_tip(
+	vbox = tab[ADVANCED_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "CDDB");
+	pWdg do_cddb_updates = new_checkbox_pack(wbox,
+						"Get disc info from the internet automatically", 0);
+	pWdg cddbServerName = new_entry_with_tip(
 									"The CDDB server to get disc info from"
 									" (default is freedb.freedb.org)");
-
-	GtkWidget *cddbPortNum = new_entry_with_tip(
+	pWdg cddbPortNum = new_entry_with_tip(
 									"The CDDB server port (default is 8880)");
-
-	GtkWidget *cddb_items[] = { new_label("Server:"), cddbServerName,
-								new_label("Port:"), cddbPortNum };
-	new_table(frameVbox, 2, 2, cddb_items);
-
-	GtkWidget *cddb_nocache = new_checkbox("Disable CDDB local cache", 1);
-	BOXPACK(frameVbox, cddb_nocache, FALSE, FALSE, 0);
-
-	frame = new_frame(0, vbox, 0);
-	GtkWidget *useProxy = new_checkbox("Use an HTTP proxy to connect to the internet", 1);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), useProxy);
-
-	frameVbox = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
-
-	GtkWidget *serverName = new_entry_with_tip("Proxy server address");
-	GtkWidget *portNum = new_entry_with_tip("Proxy server port number");
-	GtkWidget *proxy_items[] = { new_label("Proxy server:"), serverName,
-								new_label("Proxy port:"), portNum };
-	new_table(frameVbox, 2, 2, proxy_items);
-
+	pWdg cddb_items[] = { new_label("CDDB server :"), cddbServerName,
+								new_label("CDDB port :"), cddbPortNum };
+	new_table(wbox, 2, 2, cddb_items);
+	pWdg cddb_nocache = new_checkbox_pack(wbox, "Disable CDDB local cache", 0);
+	pWdg useProxy = new_checkbox("Use an HTTP proxy to connect to the internet", 1);
+	wbox = new_cframe(vbox, useProxy);
+	pWdg serverName = new_entry_with_tip("Proxy server address");
+	pWdg portNum = new_entry_with_tip("Proxy server port number");
+	pWdg proxy_items[] = { new_label("Proxy server :"), serverName,
+								new_label("Proxy port :"), portNum };
+	new_table(wbox, 2, 2, proxy_items);
 	gchar *lbl = g_strdup_printf("Log to %s", g_prefs->log_file);
-	GtkWidget *log_file = new_checkbox(lbl, 1);
-	BOXPACK(vbox, log_file, FALSE, FALSE, 0);
+	pWdg log_file = new_checkbox_pack(vbox, lbl, 0);
 	g_free(lbl);
-
-	set_tab_label(notebook, ADVANCED_TAB, "Advanced");
 	/* END ADVANCED tab */
 
-	GtkWidget *action_area = GTK_DIALOG(prefs)->action_area;
+	/* SET NOTEBOOK TABS */
+	pWdg notebook = gtk_notebook_new();
+	gtk_widget_show(notebook);
+	append_tab(notebook, tab[GENERAL_TAB], "General");
+	append_tab(notebook, tab[FILENAMES_TAB], "Filenames");
+	append_tab(notebook, tab[DRIVES_TAB], "Audio CD");
+	append_tab(notebook, tab[ENCODE_TAB], "Encode");
+	append_tab(notebook, tab[ADVANCED_TAB], "Advanced");
+
+	/* CREATE PREFS DIALOG */
+	pWdg prefs = gtk_dialog_new();
+	gtk_window_set_transient_for(GTK_WINDOW(prefs), GTK_WINDOW(win_main));
+	gtk_window_set_title(GTK_WINDOW(prefs), _("Preferences"));
+	gtk_window_set_modal(GTK_WINDOW(prefs), TRUE);
+	gtk_window_set_type_hint(GTK_WINDOW(prefs), GDK_WINDOW_TYPE_HINT_DIALOG);
+	BOXPACK(GTK_DIALOG(prefs)->vbox, notebook, TRUE, TRUE, 0);
+
+	/* ACTION BUTTONS */
+	pWdg action_area = GTK_DIALOG(prefs)->action_area;
 	gtk_widget_show(action_area);
 	gtk_button_box_set_layout(GTK_BUTTON_BOX(action_area), GTK_BUTTONBOX_END);
-
-	GtkWidget *cancel = new_button(GTK_STOCK_CANCEL);
+	pWdg cancel = new_button(GTK_STOCK_CANCEL);
 	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), cancel, GTK_RESPONSE_CANCEL);
-
-	GtkWidget *ok = new_button(GTK_STOCK_OK);
+	pWdg ok = new_button(GTK_STOCK_OK);
 	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), ok, GTK_RESPONSE_OK);
-
 	CONNECT_SIGNAL(prefs, "response", on_prefs_response);
 	CONNECT_SIGNAL(prefs, "realize", on_prefs_show);
+	/* END OF ACTION BUTTONS */
 
 	/* Store pointers to all widgets, for use by lookup_widget(). */
 	HOOKUP_NOREF(prefs, prefs, "prefs");
-	HOOKUP(prefs, cddbServerName, "cddb_server_name");
+	HOOKUP(prefs, always_overwrite, "always_overwrite");
+	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
+	HOOKUP(prefs, bitrate_value, WDG_BITRATE);
 	HOOKUP(prefs, cddbPortNum, "cddb_port");
-	HOOKUP(prefs, useProxy, "use_proxy");
-	HOOKUP(prefs, serverName, "server_name");
-	HOOKUP(prefs, portNum, "port_number");
-	HOOKUP(prefs, log_file, "do_log");
+	HOOKUP(prefs, cddbServerName, "cddb_server_name");
 	HOOKUP(prefs, cddb_nocache, "cddb_nocache");
-	HOOKUP(prefs, music_folder, WDG_MUSIC_DIR);
-	HOOKUP(prefs, make_m3u, "make_playlist");
 	HOOKUP(prefs, cdrom, "cdrom");
 	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
+	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
 	HOOKUP(prefs, eject_on_done, "eject_on_done");
-	HOOKUP(prefs, always_overwrite, "always_overwrite");
-	HOOKUP(prefs, use_notify, "use_notify");
-	HOOKUP(prefs, mb_lookup, "mb_lookup");
-	HOOKUP(prefs, rip_fast, "rip_fast");
-	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
+	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_playlist, WDG_FMT_PLAYLIST);
-	HOOKUP(prefs, rip_wav, "rip_wav");
-	HOOKUP(prefs, rip_flac, "rip_flac");
-	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
+	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
+	HOOKUP(prefs, log_file, "do_log");
+	HOOKUP(prefs, make_m3u, "make_playlist");
+	HOOKUP(prefs, mb_lookup, "mb_lookup");
 	HOOKUP(prefs, mp3_quality, WDG_MP3_QUALITY);
+	HOOKUP(prefs, mp3_quality_lbl, WDG_LBL_QUALITY_MP3);
+	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
+	HOOKUP(prefs, music_folder, WDG_MUSIC_DIR);
 	HOOKUP(prefs, ogg_quality, WDG_OGG_QUALITY);
+	HOOKUP(prefs, ogg_quality_lbl, WDG_LBL_QUALITY_OGG);
+	HOOKUP(prefs, portNum, "port_number");
+	HOOKUP(prefs, rip_fast, "rip_fast");
+	HOOKUP(prefs, rip_flac, "rip_flac");
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
 	HOOKUP(prefs, rip_ogg, "rip_ogg");
-	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
+	HOOKUP(prefs, rip_wav, "rip_wav");
+	HOOKUP(prefs, serverName, "server_name");
+	HOOKUP(prefs, useProxy, "use_proxy");
+	HOOKUP(prefs, use_notify, "use_notify");
 	return prefs;
 }
 

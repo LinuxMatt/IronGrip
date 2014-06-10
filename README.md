@@ -4,18 +4,42 @@ Graphical frontend for Audio CD ripping and encoding.
 
 Features
 --------
-- Supports WAV, MP3, Ogg Vorbis and FLAC encoding
-- Uses CDDB
-- Finds cdrom drives
+- Easy to use graphical user interface to rip and encode music from compact disc tracks at once
+- Support for several formats : WAV, MP3, Ogg Vorbis and FLAC encoding
+- Uses CDDB to get information from Internet (album and tracks)
+- Finds all connected cdrom drives automatically
 - Compilation and installation from source is so easy ;)
 [![Build Status](https://travis-ci.org/LinuxMatt/IronGrip.png?branch=master)](https://travis-ci.org/LinuxMatt/IronGrip)
+- Experimental support for MusicBrainz metadata and downloading covers from Amazon
 
-Binary packages
----------------
-You can download debian packages at http://sourceforge.net/projects/irongrip/.
+Binary packages for Linux
+-------------------------
+Binary packages are often outdated. You should definitely build from source.
+Don't worry, it's very easy ! The provided script *easy-make* is here help you.
+Just run *./easy-make.sh* in a terminal and follow the instructions.
+
+_We are looking for packagers._
+
+You can download old debian packages at http://sourceforge.net/projects/irongrip/.
 - They are compatible with Ubuntu 10.04 and above.
 - They are compatible with Linux Mint 9 and above.
 - They should also work on Debian 6 and above.
+
+Quick start guide for Ubuntu &ge; 10.04
+---------------------------------------
+- Clone the git repository or download the source tarball.
+- Go into the IronGrip source directory and run ./easy-make.sh in a terminal
+- Follow the instructions:
+
+<pre>
+  USAGE: ./easy-make.sh &lt;clean|build|package|setup|rundeps&gt;
+  
+	setup  : install required deb packages for building
+	build  : configure and compile this project
+	package: create a Debian package for this project
+	clean  : remove the files created by the 'build' action
+	rundeps: install recommended deb packages for running
+</pre>
 
 News, help, bugs, suggestions and feedback
 ------------------------------------------
@@ -27,6 +51,7 @@ This project is still young, it *needs your feedback* ;)
 
 Requirements
 ------------
+To make it short, any Linux distribution released after 2007 should be compatible.
 - Linux
 - GTK+ 2.12 or greater
 - Glib 2.16 or greater

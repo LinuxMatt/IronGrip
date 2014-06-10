@@ -140,6 +140,7 @@
 #define WDG_LBL_QUALITY_OGG "quality_label_ogg"
 #define WDG_LBL_BITRATE "bitrate_label"
 #define WDG_LBL_FREESPACE "freespace_label"
+#define WDG_LBL_IRONSEEK "ironseek_label"
 #define WDG_MUSIC_DIR "music_dir"
 #define WDG_MAIN_PANEL "main_panel"
 #define WDG_IRON_PANEL "iron_panel"
@@ -2168,6 +2169,12 @@ static void on_seek_clicked(GtkToolButton *button, gpointer user_data)
 	disable_all_main_widgets();
 	gtk_widget_hide(LKP_MAIN(WDG_MAIN_PANEL));
 	gtk_widget_show(LKP_MAIN(WDG_IRON_PANEL));
+
+	GtkLabel *lbl = GTK_LABEL(LKP_MAIN(WDG_LBL_IRONSEEK));
+	gchar txt[SZENTRY];
+	snprintf(txt, SZENTRY, "Contacting web service at musicbrainz.org...\n\n"
+			"Disc id : <b>%s</b>", g_data->disc_id);
+	gtk_label_set_markup(lbl, txt);
 	g_thread_create(seek_thread, NULL, TRUE, NULL);
 }
 
@@ -2759,14 +2766,8 @@ static GtkWidget *create_main(void)
 	GtkWidget *ironbox = gtk_vbox_new(FALSE, 0);
 	gtk_container_add(GTK_CONTAINER(mainbox), ironbox);
 
-	// GtkWidget *ironframe = gtk_frame_new(NULL);
-	// gtk_widget_show(ironframe);
-	// gtk_container_add(GTK_CONTAINER(ironframe), mb_label);
-	// gtk_frame_set_label(GTK_FRAME(ironframe), "IronSeek");
-
 	GtkWidget *mb_label = new_label("Please wait...");
 	gtk_misc_set_alignment(GTK_MISC(mb_label), 0.5, 0.5);
-	//gtk_container_add(GTK_CONTAINER(ironbox), mb_label);
 	BOXPACK(ironbox, mb_label, TRUE, TRUE, 3);
 
 	GtkWidget *table = gtk_table_new(4, 3, FALSE);
@@ -2934,6 +2935,7 @@ static GtkWidget *create_main(void)
 	HOOKUP(main_win, disc, WDG_DISC);
 	HOOKUP(main_win, lookup, WDG_CDDB);
 	HOOKUP(main_win, seek_button, WDG_SEEK);
+	HOOKUP(main_win, mb_label, WDG_LBL_IRONSEEK);
 	HOOKUP(main_win, pick_disc, WDG_PICK_DISC);
 	HOOKUP(main_win, pref, WDG_PREFS);
 	HOOKUP(main_win, rip_button, WDG_RIP);
@@ -4744,7 +4746,7 @@ static gpointer track_thread(gpointer data)
 }
 static gpointer seek_thread(gpointer data)
 {
-	set_gui_action(ACTION_SEEKSTART, false);
+	set_gui_action(ACTION_SEEKSTART, true);
 	mbresult_t res;
 	if(musicbrainz_lookup(g_data->disc_id, &res)) {
 		musicbrainz_scan(&res, g_prefs->music_dir);
@@ -5898,6 +5900,7 @@ static void musicbrainz_scan(const mbresult_t * res, char *path)
 	gchar *dir = g_strdup_printf("%s/MusicBrainz-DiscId-[%s]", path, g_data->disc_id);
 	if(!mkdir_p(dir)) return;
 
+	notify("Downloading...");
 	//printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", g_data->disc_id);
 
 	for (uint16_t r = 0; r < res->releaseCount; r++) {

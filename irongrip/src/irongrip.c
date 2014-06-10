@@ -1450,7 +1450,7 @@ static bool check_disc()
 	if (!drive_opened) {
 		set_status("Cannot access cdrom drive (maybe missing, busy, or tray opened).");
 	} else {
-		Sleep(INSERT_CD_INTERVAL);
+		//Sleep(INSERT_CD_INTERVAL);
 		set_status("Please insert an audio disc in the cdrom drive...");
 		disable_lookup_widgets();
 		if (!alreadyCleared) {

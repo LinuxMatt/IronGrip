@@ -141,6 +141,8 @@
 #define WDG_LBL_BITRATE "bitrate_label"
 #define WDG_LBL_FREESPACE "freespace_label"
 #define WDG_MUSIC_DIR "music_dir"
+#define WDG_MAIN_PANEL "main_panel"
+#define WDG_IRON_PANEL "iron_panel"
 
 #define STR_FREE(x) g_free(x);x=NULL
 #define Sleep(x) usleep(x*1000)
@@ -226,7 +228,9 @@ enum {
 	ACTION_COMPLETION,
 	ACTION_ENCODED,
 	ACTION_EJECTING,
-	ACTION_FREESPACE
+	ACTION_FREESPACE,
+	ACTION_SEEKSTART,
+	ACTION_SEEKEND
 };
 
 enum { FLAC, LAME, OGGENC };
@@ -416,6 +420,7 @@ static char *prefs_get_music_dir(prefs *p);
 static gchar* get_config_path(const gchar *file_suffix);
 static gpointer encode_thread(gpointer data);
 static gpointer track_thread(gpointer data);
+static gpointer seek_thread(gpointer data);
 static int exec_with_output(const char *args[], int toread, pid_t *p);
 static int is_valid_port_number(int number);
 static void disable_all_main_widgets(void);
@@ -701,6 +706,8 @@ static gchar *action2str(int action) {
 		case ACTION_ENCODED: return "ACTION_ENCODED";
 		case ACTION_EJECTING: return "ACTION_EJECTING";
 		case ACTION_FREESPACE: return "ACTION_FREESPACE";
+		case ACTION_SEEKSTART: return "ACTION_SEEKSTART";
+		case ACTION_SEEKEND: return "ACTION_SEEKEND";
 	}
 	return "UNKNOWN_ACTION";
 }
@@ -1234,21 +1241,28 @@ static void show_dialog(GtkMessageType type, GtkButtonsType btn, char *fmt, ...)
     gtk_widget_destroy (dialog);
     g_free(txt);
 }
+static void enable_widget(char *name) {
+	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
+}
 
+static void disable_widget(char *name) {
+	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
+}
 static void clear_widgets()
 {
 	// hide the widgets for multiple albums
 	gtk_widget_hide(LKP_MAIN(WDG_DISC));
 	gtk_widget_hide(LKP_MAIN(WDG_PICK_DISC));
 	// clear the textboxes
-	CLEAR_TEXT("album_artist");
-	CLEAR_TEXT("album_title");
+	CLEAR_TEXT(WDG_ALBUM_ARTIST);
+	CLEAR_TEXT(WDG_ALBUM_TITLE);
 	CLEAR_TEXT(WDG_ALBUM_GENRE);
 	CLEAR_TEXT(WDG_ALBUM_YEAR);
 	// clear the tracklist
 	gtk_tree_view_set_model(LKP_TRACKLIST, NULL);
 	// disable the "rip" button
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_RIP), FALSE);
+	disable_widget(WDG_RIP);
+	disable_widget(WDG_SEEK);
 }
 
 static GdkPixbuf *LoadMainIcon()
@@ -1729,7 +1743,7 @@ static void update_tracklist(cddb_disc_t *disc)
 
 	if (disc_artist != NULL) {
 		SANITIZE(disc_artist);
-		SET_MAIN_TEXT("album_artist", disc_artist);
+		SET_MAIN_TEXT(WDG_ALBUM_ARTIST, disc_artist);
 
 		bool singleartist= true;
 		for (track = cddb_disc_get_track_first(disc);
@@ -1863,8 +1877,8 @@ static bool refresh(int force)
 	gtk_widget_set_sensitive(LKP_MAIN(WDG_RIP), TRUE);
 
 	// show the temporary info
-	SET_MAIN_TEXT("album_artist", "Unknown Artist");
-	SET_MAIN_TEXT("album_title", "Unknown Album");
+	SET_MAIN_TEXT(WDG_ALBUM_ARTIST, "Unknown Artist");
+	SET_MAIN_TEXT(WDG_ALBUM_TITLE, "Unknown Album");
 	update_tracklist(disc);
 	if (!g_prefs->do_cddb_updates && !force) {
 		enable_all_main_widgets();
@@ -2072,14 +2086,6 @@ static void on_s_drive_changed(GtkComboBox *combo, gpointer user_data)
 	}
 }
 
-static void enable_widget(char *name) {
-	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
-}
-
-static void disable_widget(char *name) {
-	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
-}
-
 static void on_pick_disc_changed(GtkComboBox *combobox, gpointer user_data)
 {
 	cddb_disc_t *disc = g_list_nth_data(g_data->disc_matches,
@@ -2122,10 +2128,11 @@ static void on_prefs_response(GtkDialog *dialog, gint response, gpointer data)
 		if (!prefs_are_valid()) return;
 		get_prefs_from_widgets(g_prefs);
 		save_prefs(g_prefs);
-		if(g_prefs->mb_lookup)
+		if(g_prefs->mb_lookup) {
 			enable_widget(WDG_SEEK);
-		else
+		} else {
 			disable_widget(WDG_SEEK);
+		}
 	}
 	gtk_widget_hide(GTK_WIDGET(dialog));
 }
@@ -2158,11 +2165,10 @@ static void on_seek_clicked(GtkToolButton *button, gpointer user_data)
 	if(!g_prefs->music_dir) return;
 	if(!is_directory(g_prefs->music_dir)) return;
 
-	mbresult_t res;
-	if(musicbrainz_lookup(g_data->disc_id, &res)) {
-		musicbrainz_scan(&res, g_prefs->music_dir);
-	}
-	mb_free(&res);
+	disable_all_main_widgets();
+	gtk_widget_hide(LKP_MAIN(WDG_MAIN_PANEL));
+	gtk_widget_show(LKP_MAIN(WDG_IRON_PANEL));
+	g_thread_create(seek_thread, NULL, TRUE, NULL);
 }
 
 static bool lookup_cdparanoia()
@@ -2595,7 +2601,7 @@ static GtkWidget *new_entry_with_tip(gchar *tip)
 static GtkWidget *new_vbox(int border_width)
 {
 	GtkWidget *p = gtk_vbox_new(FALSE, 0);
-	gtk_container_set_border_width(GTK_CONTAINER(p), border_width+2);
+	gtk_container_set_border_width(GTK_CONTAINER(p), border_width);
 	gtk_widget_show(p);
 	return p;
 }
@@ -2699,6 +2705,15 @@ static GtkWidget *new_hscale(GtkWidget *parent, int min, int max)
 	BOXPACK(parent, p, TRUE, TRUE, 0);
 	return p;
 }
+static GtkCellRenderer *new_cell(GCallback cb)
+{
+	GtkCellRenderer *cell = gtk_cell_renderer_text_new();
+	if(cb) {
+		g_object_set(cell, "editable", TRUE, NULL);
+		CONNECT_SIGNAL(cell, "edited", cb);
+	}
+	return cell;
+}
 static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -2712,22 +2727,21 @@ static GtkWidget *create_main(void)
 	}
 	gtk_window_set_position(GTK_WINDOW(main_win), GTK_WIN_POS_CENTER);
 
-	GtkWidget *vbox1 = new_vbox(0);
-	gtk_container_add(GTK_CONTAINER(main_win), vbox1);
+	GtkWidget *mainbox = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(main_win), mainbox);
 
 	GtkWidget *toolbar = gtk_toolbar_new();
 	gtk_widget_show(toolbar);
-	BOXPACK(vbox1, toolbar, FALSE, FALSE, 0);
+	BOXPACK(mainbox, toolbar, FALSE, FALSE, 0);
 	gtk_toolbar_set_style(GTK_TOOLBAR(toolbar), GTK_TOOLBAR_BOTH_HORIZ);
 
 	GtkWidget *lookup = new_button_with_icon(toolbar, GTK_STOCK_REFRESH,
 			_("CDDB Lookup"), _("Look up into the CDDB for information about this audio disc."));
+	gtk_widget_set_sensitive(lookup, FALSE);
 
 	GtkWidget *seek_button = new_button_with_icon(toolbar, GTK_STOCK_EXECUTE,
 			_("IronSeek"), _("Look up into MusicBrainz and Amazon for metadata and covers."));
-
-	if(!g_prefs->mb_lookup)
-		gtk_widget_set_sensitive(seek_button, FALSE);
+	gtk_widget_set_sensitive(seek_button, FALSE);
 
 	GtkWidget *pref = new_button_with_icon(toolbar, GTK_STOCK_PREFERENCES, NULL, NULL);
 	new_separator(toolbar, FALSE);
@@ -2739,14 +2753,29 @@ static GtkWidget *create_main(void)
 	new_separator(toolbar, TRUE);
 	GtkWidget *about = new_button_with_icon(toolbar, GTK_STOCK_ABOUT, NULL, NULL);
 
+	GtkWidget *vbox1 = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(mainbox), vbox1);
+
+	GtkWidget *ironbox = gtk_vbox_new(FALSE, 0);
+	gtk_container_add(GTK_CONTAINER(mainbox), ironbox);
+
+	// GtkWidget *ironframe = gtk_frame_new(NULL);
+	// gtk_widget_show(ironframe);
+	// gtk_container_add(GTK_CONTAINER(ironframe), mb_label);
+	// gtk_frame_set_label(GTK_FRAME(ironframe), "IronSeek");
+
+	GtkWidget *mb_label = new_label("Please wait...");
+	gtk_misc_set_alignment(GTK_MISC(mb_label), 0.5, 0.5);
+	//gtk_container_add(GTK_CONTAINER(ironbox), mb_label);
+	BOXPACK(ironbox, mb_label, TRUE, TRUE, 3);
+
 	GtkWidget *table = gtk_table_new(4, 3, FALSE);
 	gtk_widget_show(table);
 	BOXPACK(vbox1, table, FALSE, TRUE, 3);
+	GtkTable *tbl = GTK_TABLE(table);
 
 	GtkWidget *album_artist = new_entry();
 	create_completion(album_artist, WDG_ALBUM_ARTIST);
-
-	GtkTable *tbl = GTK_TABLE(table);
 	gtk_table_attach(tbl, album_artist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
 
 	GtkWidget *album_title = new_entry();
@@ -2818,35 +2847,29 @@ static GtkWidget *create_main(void)
 	// Set up all the columns for the track listing widget
 #define TRACK_INSERT(text,type,column) \
 	gtk_tree_view_insert_column_with_attributes(\
-			GTK_TREE_VIEW(tracklist), -1, text, cell, type, column, NULL)
+			GTK_TREE_VIEW(tracklist), -1, _(text), cell, type, column, NULL)
 
 	GtkCellRenderer *cell = gtk_cell_renderer_toggle_new();
 	g_object_set(cell, "activatable", TRUE, NULL);
 	CONNECT_SIGNAL(cell, "toggled", on_rip_toggled);
-	TRACK_INSERT(_("Rip"), "active", COL_RIPTRACK);
+	TRACK_INSERT("Rip", "active", COL_RIPTRACK);
 	GtkTreeViewColumn *col = gtk_tree_view_get_column(tracktree, COL_RIPTRACK);
 	gtk_tree_view_column_set_clickable(col, TRUE);
 
-	cell = gtk_cell_renderer_text_new();
-	TRACK_INSERT(_("Track"), STR_TEXT, COL_TRACKNUM);
+	cell = new_cell(NULL);
+	TRACK_INSERT("Track", STR_TEXT, COL_TRACKNUM);
+
+	cell = new_cell(G_CALLBACK(on_artist_edited));
+	TRACK_INSERT("Artist", STR_TEXT, COL_TRACKARTIST);
+
+	cell = new_cell(G_CALLBACK(on_title_edited));
+	TRACK_INSERT("Title", STR_TEXT, COL_TRACKTITLE);
+
+	cell = new_cell(G_CALLBACK(on_genre_edited));
+	TRACK_INSERT("Genre", STR_TEXT, COL_GENRE);
 
 	cell = gtk_cell_renderer_text_new();
-	g_object_set(cell, "editable", TRUE, NULL);
-	CONNECT_SIGNAL(cell, "edited", on_artist_edited);
-	TRACK_INSERT(_("Artist"), STR_TEXT, COL_TRACKARTIST);
-
-	cell = gtk_cell_renderer_text_new();
-	g_object_set(cell, "editable", TRUE, NULL);
-	CONNECT_SIGNAL(cell, "edited", on_title_edited);
-	TRACK_INSERT(_("Title"), STR_TEXT, COL_TRACKTITLE);
-
-	cell = gtk_cell_renderer_text_new();
-	g_object_set(cell, "editable", TRUE, NULL);
-	CONNECT_SIGNAL(cell, "edited", on_genre_edited);
-	TRACK_INSERT(_("Genre"), STR_TEXT, COL_GENRE);
-
-	cell = gtk_cell_renderer_text_new();
-	TRACK_INSERT(_("Time"), STR_TEXT, COL_TRACKTIME);
+	TRACK_INSERT("Time", STR_TEXT, COL_TRACKTIME);
 
 	// set up the columns for the album selecting dropdown box
 	cell = gtk_cell_renderer_text_new();
@@ -2857,13 +2880,10 @@ static GtkWidget *create_main(void)
 	gtk_cell_layout_pack_start(disc_layout, cell, TRUE);
 	gtk_cell_layout_set_attributes(disc_layout, cell, STR_TEXT, 1, NULL);
 
-	// Bottom HBOX
-	GtkWidget *hbox5 = new_hbox(0);
-	BOXPACK(vbox1, hbox5, FALSE, TRUE, 5);
-
+	// Status line
 	GtkWidget *statusLbl = new_label("Welcome to " PROGRAM_NAME " v." VERSION);
 	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
-	BOXPACK(hbox5, statusLbl, TRUE, TRUE, 0);
+	BOXPACK(mainbox, statusLbl, FALSE, FALSE, 0);
 
 	CONNECT_SIGNAL(main_win, "delete_event", on_window_close);
 	CONNECT_SIGNAL(tracklist, "button-press-event", on_tracklist_clicked);
@@ -2926,6 +2946,8 @@ static GtkWidget *create_main(void)
 	HOOKUP(main_win, progress_rip, WDG_PROGRESS_RIP);
 	HOOKUP(main_win, progress_encode, WDG_PROGRESS_ENCODE);
 	HOOKUP(main_win, win_ripping, WDG_RIPPING);
+	HOOKUP(main_win, vbox1, WDG_MAIN_PANEL);
+	HOOKUP(main_win, ironbox, WDG_IRON_PANEL);
 	HOOKUP_NOREF(main_win, main_win, WDG_MAIN);
 
 	return main_win;
@@ -3171,7 +3193,7 @@ static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
 
 static void disable_all_main_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
+	disable_widget(WDG_TRACKLIST);
 	disable_widget(WDG_DISC);
 	disable_widget(WDG_LBL_GENRE);
 	disable_widget(WDG_LBL_ALBUMTITLE);
@@ -3191,7 +3213,7 @@ static void disable_all_main_widgets(void)
 
 static void disable_lookup_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
+	disable_widget(WDG_TRACKLIST);
 	disable_widget(WDG_DISC);
 	disable_widget(WDG_LBL_GENRE);
 	disable_widget(WDG_LBL_ALBUMTITLE);
@@ -3210,7 +3232,7 @@ static void disable_lookup_widgets(void)
 
 static void enable_all_main_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), TRUE);
+	enable_widget(WDG_TRACKLIST);
 	enable_widget(WDG_DISC);
 	enable_widget(WDG_LBL_GENRE);
 	enable_widget(WDG_LBL_ALBUMTITLE);
@@ -4720,7 +4742,17 @@ static gpointer track_thread(gpointer data)
 	TRACEINFO("The End.");
 	return NULL;
 }
-
+static gpointer seek_thread(gpointer data)
+{
+	set_gui_action(ACTION_SEEKSTART, false);
+	mbresult_t res;
+	if(musicbrainz_lookup(g_data->disc_id, &res)) {
+		musicbrainz_scan(&res, g_prefs->music_dir);
+	}
+	mb_free(&res);
+	set_gui_action(ACTION_SEEKEND, false);
+	return NULL;
+}
 // signal handler to find out when our child has exited
 static void sigchld()
 {
@@ -4891,6 +4923,19 @@ static gboolean cb_gui_update(gpointer data)
 				GtkLabel *lbl = GTK_LABEL(LKP_PREF(WDG_LBL_FREESPACE));
 				gtk_label_set_markup(lbl, g_data->label_space);
 			}
+			g_data->action = NO_ACTION;
+			break;
+
+		case ACTION_SEEKSTART:
+			set_status("Please wait...");
+			g_data->action = NO_ACTION;
+			break;
+
+		case ACTION_SEEKEND:
+			enable_all_main_widgets();
+			set_status("Search finished.");
+			gtk_widget_hide(LKP_MAIN(WDG_IRON_PANEL));
+			gtk_widget_show(LKP_MAIN(WDG_MAIN_PANEL));
 			g_data->action = NO_ACTION;
 			break;
 	}

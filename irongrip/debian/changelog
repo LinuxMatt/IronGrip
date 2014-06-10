@@ -1,3 +1,12 @@
+irongrip (0.9-1) unstable; urgency=low
+
+  * Add experimental support for MusicBrainz.
+  * Display free space in preferences for destination folder.
+  * Check whether destination folder is readonly.
+  * Add new actions to easy-make
+
+ -- Matt Thirtytwo (LinuxMatt) <matt.59491@gmail.com>  Mon, 23 May 2014 20:00:00 +0200
+
 irongrip (0.8-1) unstable; urgency=low
 
   * Add support for Ogg Vorbis encoding.

@@ -32,6 +32,7 @@
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
 #endif
+#include <assert.h>
 #include <cddb/cddb.h>
 #include <ctype.h>
 #include <dlfcn.h>
@@ -45,6 +46,7 @@
 #include <limits.h>
 #include <linux/cdrom.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -116,6 +118,7 @@
 #define WDG_ABOUT "about"
 #define WDG_DISC "disc"
 #define WDG_CDDB "lookup"
+#define WDG_SEEK "seek"
 #define WDG_MAIN "main"
 #define WDG_PREFS "preferences"
 #define WDG_RIP "rip_button"
@@ -136,10 +139,20 @@
 #define WDG_LBL_QUALITY_MP3 "quality_label_mp3"
 #define WDG_LBL_QUALITY_OGG "quality_label_ogg"
 #define WDG_LBL_BITRATE "bitrate_label"
+#define WDG_LBL_FREESPACE "freespace_label"
+#define WDG_LBL_IRONSEEK "ironseek_label"
 #define WDG_MUSIC_DIR "music_dir"
+#define WDG_MAIN_PANEL "main_panel"
+#define WDG_IRON_PANEL "iron_panel"
 
 #define STR_FREE(x) g_free(x);x=NULL
 #define Sleep(x) usleep(x*1000)
+#define SIGNAL_PAUSE 50
+#define THREAD_WAIT (SIGNAL_PAUSE * 2)
+#define REFRESH_INTERVAL 200
+#define INSERT_CD_INTERVAL 700
+#define CD_SCAN_INTERVAL 5000
+#define FS_SCAN_INTERVAL 7000
 
 #define DIALOG_INFO_OK(...) \
 	show_dialog(GTK_MESSAGE_INFO, GTK_BUTTONS_OK,  __VA_ARGS__)
@@ -215,13 +228,15 @@ enum {
 	ACTION_READY,
 	ACTION_COMPLETION,
 	ACTION_ENCODED,
-	ACTION_EJECTING
+	ACTION_EJECTING,
+	ACTION_FREESPACE,
+	ACTION_SEEKSTART,
+	ACTION_SEEKEND
 };
 
 enum { FLAC, LAME, OGGENC };
 
 #define SZENTRY 256
-
 static void szcopy(char dst[SZENTRY], const gchar *src)
 {
 	memset(dst,0,SZENTRY);
@@ -252,6 +267,8 @@ typedef struct _prefs {
     int main_window_height;
     int eject_on_done;
     int always_overwrite;
+    int use_notify;
+    int mb_lookup;
     int rip_fast;
     int do_cddb_updates;
     int use_proxy;
@@ -287,6 +304,7 @@ typedef struct _shared {
 	bool overwriteNone;
 	bool trace;
 	bool working; // ripping or encoding
+    bool has_notify;
 	cddb_conn_t *cddb_conn;
 	cddb_disc_t *cddb_disc;
 	double mp3_percent;
@@ -320,6 +338,10 @@ typedef struct _shared {
 	char sencode[13];
 	double ptotal;
 	int parts;
+	guint64 free_space;
+	guint64 total_space;
+	gchar label_space[128];
+	gchar disc_id[64];
 } shared;
 
 typedef struct _cdrom {
@@ -327,6 +349,62 @@ typedef struct _cdrom {
 	gchar *device;
 	int fd;
 } s_drive;
+
+typedef struct {
+	char *artistName;
+	char *artistNameSort;
+	uint8_t artistIdCount;
+	char **artistId;
+} mbartistcredit_t;
+
+typedef struct {
+	char *trackName;
+	char *trackId;
+	mbartistcredit_t trackArtist;
+} mbtrack_t;
+
+/** Representation of a MusicBrainz medium.
+ * This gives information about some specific CD.
+ */
+typedef struct {
+	/** Sequence number of the disc in the release.
+     * For single CD releases, this will always be 1, otherwise it will be
+     * the number of the CD in the released set.
+     */
+	uint16_t discNum;
+
+	/** Title of the disc if there is one. */
+	char *title;
+
+	/** Count of tracks in the medium. */
+	uint16_t trackCount;
+
+	/** Array of the track information. */
+	mbtrack_t *track;
+
+} mbmedium_t;
+
+typedef struct {
+	char *releaseGroupId;
+	char *releaseId;
+	char *releaseDate;
+	char *asin;
+	char *albumTitle;
+	char *releaseType;
+	mbartistcredit_t albumArtist;
+
+	/** Total mediums in the release i.e. number of CDs for multidisc releases. */
+	uint16_t discTotal;
+
+	mbmedium_t medium;
+} mbrelease_t;
+
+typedef struct {
+	uint16_t releaseCount;
+	mbrelease_t *release;
+} mbresult_t;
+
+#define M_ArrayElem(a) (sizeof(a) / sizeof(a[1]))
 
 // Global objects
 static GtkWidget *win_main = NULL;
@@ -343,6 +421,7 @@ static char *prefs_get_music_dir(prefs *p);
 static gchar* get_config_path(const gchar *file_suffix);
 static gpointer encode_thread(gpointer data);
 static gpointer track_thread(gpointer data);
+static gpointer seek_thread(gpointer data);
 static int exec_with_output(const char *args[], int toread, pid_t *p);
 static int is_valid_port_number(int number);
 static void disable_all_main_widgets(void);
@@ -360,6 +439,106 @@ static void set_status(char *text);
 static void fmt_status(const char *fmt, ...);
 static void set_widgets_from_prefs(prefs *p);
 static void sigchld();
+static void set_gui_action(int action, gboolean wait);
+static GtkWidget *lookup_widget(GtkWidget *widget, const gchar *name);
+static bool musicbrainz_lookup(const char *discId, mbresult_t * res);
+static void musicbrainz_print(FILE *fd, const mbrelease_t * rel);
+static void musicbrainz_scan(const mbresult_t * res, char *path);
+static void fetch_image(const mbrelease_t *rel, char *path);
+static void mb_free(mbresult_t * res);
+
+/** Compare two strings, either of which maybe NULL.  */
+static int strcheck(const char *a, const char *b)
+{
+	if (a == NULL && b == NULL) {
+		return 0;
+	} else if (a == NULL) {
+		return -1;
+	} else if (b == NULL) {
+		return 1;
+	} else {
+		return strcmp(a, b);
+	}
+}
+
+static gboolean stat_file(const char *path) {
+	struct stat sts;
+	if(stat(path,&sts)!=0) {
+		printf("Cannot stat file [%s], error=[%s]", path, strerror(errno));
+		return FALSE;
+	}
+	gchar smode[11];
+	memset(smode,0,sizeof(smode));
+	memset(smode,'-',sizeof(smode)-1);
+	if(sts.st_mode & S_IFLNK) smode[0] = 'l';
+	if(sts.st_mode & S_IFSOCK) smode[0] = 's';
+	if(sts.st_mode & S_IFBLK) smode[0] = 'b';
+	if(sts.st_mode & S_IFCHR) smode[0] = 'c';
+	if(sts.st_mode & S_IFDIR) smode[0] = 'd';
+	if(sts.st_mode & S_IRUSR) smode[1] = 'r'; /* 3 bits for user  */
+	if(sts.st_mode & S_IWUSR) smode[2] = 'w';
+	if(sts.st_mode & S_IXUSR) smode[3] = 'x';
+	if(sts.st_mode & S_IRGRP) smode[4] = 'r'; /* 3 bits for group */
+	if(sts.st_mode & S_IWGRP) smode[5] = 'w';
+	if(sts.st_mode & S_IXGRP) smode[6] = 'x';
+	if(sts.st_mode & S_IROTH) smode[7] = 'r'; /* 3 bits for other */
+	if(sts.st_mode & S_IWOTH) smode[8] = 'w';
+	if(sts.st_mode & S_IXOTH) smode[9] = 'x';
+	// struct passwd *pwd = getpwuid(sts.st_uid);
+	// printf("MODE = [%d][%s][%s] %s\n",sts.st_mode, smode, pwd->pw_name, path);
+	return TRUE;
+}
+
+static void print_fileinfo(GFileInfo *fi, const gchar *path) {
+	guint64 n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+	g_data->free_space = n;
+	gchar *s1 = g_format_size_for_display(n);
+	n = g_file_info_get_attribute_uint64 (fi, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+	g_data->total_space = n;
+	gchar *s2 = g_format_size_for_display(n);
+	gchar *s3 = (gchar *) g_file_info_get_attribute_string(fi, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+	gboolean readonly = g_file_info_get_attribute_boolean(fi, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY);
+	if(!readonly && access(path, W_OK) != 0) {
+		readonly = true;
+	}
+	stat_file(path);
+	size_t lz = sizeof(g_data->label_space);
+	char *p = g_data->label_space;
+	int w = snprintf(p, lz, "%s / %s", s1, s2);
+	if(readonly && w < lz-1) {
+		w+=snprintf(p+w, lz-w, " (<span foreground=\"red\" weight=\"bold\">read-only</span>)");
+	}
+	// printf("lz=%d w=%d p=[%s]\n",lz,w,p);
+	g_free(s1);
+	g_free(s2);
+	g_free(s3);
+}
+static void get_fs_info_cb (GObject *src, GAsyncResult *res, gpointer data)
+{
+	GFileInfo *fi = g_file_query_filesystem_info_finish(G_FILE(src), res, NULL);
+	if (fi) {
+        print_fileinfo(fi, (gchar*) data);
+		//g_object_unref (fi);
+		set_gui_action(ACTION_FREESPACE, false);
+	}
+}
+static void query_fs_async(const gchar *path, gpointer data)
+{
+	GFile *f = g_file_new_for_path(path);
+	g_file_query_filesystem_info_async (f,"filesystem::*", 0, NULL, get_fs_info_cb, (gpointer)path);
+	g_object_unref(f);
+}
+static gboolean gfileinfo_cb (gpointer data)
+{
+	int from = GPOINTER_TO_INT(data);
+	// printf("gfileinfo_cb %d\n", from);
+	if(from==0) { // Global
+		if(g_prefs && g_prefs->music_dir) query_fs_async(g_prefs->music_dir, data);
+	} else {
+		query_fs_async(GET_PREF_TEXT(WDG_MUSIC_DIR), data);
+	}
+	return FALSE;
+}
 
 static s_drive* new_drive()
 {
@@ -527,6 +706,9 @@ static gchar *action2str(int action) {
 		case ACTION_COMPLETION: return "ACTION_COMPLETION";
 		case ACTION_ENCODED: return "ACTION_ENCODED";
 		case ACTION_EJECTING: return "ACTION_EJECTING";
+		case ACTION_FREESPACE: return "ACTION_FREESPACE";
+		case ACTION_SEEKSTART: return "ACTION_SEEKSTART";
+		case ACTION_SEEKEND: return "ACTION_SEEKEND";
 	}
 	return "UNKNOWN_ACTION";
 }
@@ -1060,21 +1242,28 @@ static void show_dialog(GtkMessageType type, GtkButtonsType btn, char *fmt, ...)
     gtk_widget_destroy (dialog);
     g_free(txt);
 }
+static void enable_widget(char *name) {
+	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
+}
 
+static void disable_widget(char *name) {
+	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
+}
 static void clear_widgets()
 {
 	// hide the widgets for multiple albums
 	gtk_widget_hide(LKP_MAIN(WDG_DISC));
 	gtk_widget_hide(LKP_MAIN(WDG_PICK_DISC));
 	// clear the textboxes
-	CLEAR_TEXT("album_artist");
-	CLEAR_TEXT("album_title");
+	CLEAR_TEXT(WDG_ALBUM_ARTIST);
+	CLEAR_TEXT(WDG_ALBUM_TITLE);
 	CLEAR_TEXT(WDG_ALBUM_GENRE);
 	CLEAR_TEXT(WDG_ALBUM_YEAR);
 	// clear the tracklist
 	gtk_tree_view_set_model(LKP_TRACKLIST, NULL);
 	// disable the "rip" button
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_RIP), FALSE);
+	disable_widget(WDG_RIP);
+	disable_widget(WDG_SEEK);
 }
 
 static GdkPixbuf *LoadMainIcon()
@@ -1100,26 +1289,43 @@ static GdkPixbuf *LoadMainIcon()
 		goto cleanup;\
 	}
 
-static int notify(char *message)
+static void* get_notify_lib(int *version)
 {
 	static void *h = NULL;
+	static int v = 0;
+	char *libs[] = { "libnotify.so.4", "libnotify.so.1", "libnotify.so", NULL };
+	int ver[] =  { 4, 1, 0};
+
+	*version = v;
+	if(h) return h;
+	for(int i = 0; i < 3; i++) {
+		v = *version = ver[i];
+		h = dlopen(libs[i], RTLD_LAZY);
+		if(h) {
+			// printf("Loaded %s\n", *p);
+			return h;
+		}
+	}
+	printf("Failed to open libnotify library version 4 and 1.\n");
+	return NULL;
+}
+
+static int notify(char *message)
+{
 	typedef void  (*ntf_init_t)(char*);
 	typedef void *(*ntf_new_t)(char*,char*,char*,char*);
 	typedef void  (*ntf_set_timeout_t)(void*,int);
 	typedef void  (*ntf_show_t)(void*,char*);
 	typedef void  (*ntf_icon_t)(void*,void*);
 	int ret = 0;
-
+	int version = 0;
+	void *h = get_notify_lib(&version);
 	if(!h) {
-		h= dlopen("libnotify.so.1", RTLD_LAZY);
-		if (h == NULL) {
-			h= dlopen("libnotify.so.4", RTLD_LAZY);
-			if (h == NULL) {
-				printf("Failed to open library version 1 and 4\n");
-				return ret;
-			}
-		}
+		g_data->has_notify = false;
+		return ret;
 	}
+	g_data->has_notify = true;
+	if(!g_prefs->use_notify) return 0;
 	FMAP(ntf_init_t,"notify_init",nn_init);
 	FMAP(ntf_new_t,"notify_notification_new",nn_new);
 	FMAP(ntf_set_timeout_t,"notify_notification_set_timeout",nn_st);
@@ -1129,10 +1335,12 @@ static int notify(char *message)
 	nn_init(PROGRAM_NAME);
 	void *n = nn_new(PROGRAM_NAME, message, NULL, NULL);
 	nn_st(n, 6000);
-	GdkPixbuf *icon = LoadMainIcon();
-	if (icon) {
-		nn_icon(n, icon);
-		g_object_unref(icon);
+	if(version == 4) { // That would crash with libnotify version 1.
+		GdkPixbuf *icon = LoadMainIcon();
+		if (icon) {
+			nn_icon(n, icon);
+			g_object_unref(icon);
+		}
 	}
 	nn_show(n, NULL);
 	ret = 1;
@@ -1216,7 +1424,7 @@ static bool check_disc()
 		}
 		drive_opened = true;
 		if(!alreadyGood) {
-			set_status("<b>Reading disc contents...</b>");
+			//set_status("<b>Reading disc contents...</b>");
 			GTK_REFRESH;
 		}
 		g_atomic_int_set(&g_data->ioctl_thread_running, 1);
@@ -1224,7 +1432,7 @@ static bool check_disc()
 											GINT_TO_POINTER(fd), TRUE, NULL);
 		while (g_atomic_int_get(&g_data->ioctl_thread_running) != 0) {
 			GTK_REFRESH;
-			Sleep(200);
+			Sleep(THREAD_WAIT);
 		}
 		int status = ioctl(fd, CDROM_DISC_STATUS, CDSL_CURRENT);
 		close(fd);
@@ -1241,9 +1449,9 @@ static bool check_disc()
 	}
 	alreadyGood = false;
 	if (!drive_opened) {
-		set_status("Error: cannot access to the cdrom drive !");
+		set_status("Cannot access cdrom drive (maybe missing, busy, or tray opened).");
 	} else {
-		Sleep(700);
+		//Sleep(INSERT_CD_INTERVAL);
 		set_status("Please insert an audio disc in the cdrom drive...");
 		disable_lookup_widgets();
 		if (!alreadyCleared) {
@@ -1291,8 +1499,8 @@ static GtkTreeModel *create_model_from_disc(cddb_disc_t *disc)
 					   COL_TRACKNUM, number,
 					   COL_TRACKARTIST, artist,
 					   COL_TRACKTITLE, title,
-					   COL_TRACKTIME, time,
 					   COL_GENRE, cddb_disc_get_genre(disc),
+					   COL_TRACKTIME, time,
 					   COL_YEAR, year_str, -1);
 	}
 	return GTK_TREE_MODEL(store);
@@ -1382,15 +1590,13 @@ static void lookup_disc(cddb_disc_t *disc)
 
 	// show cddb update window
 	disable_all_main_widgets();
-	GtkLabel *status = GTK_LABEL(LKP_MAIN(WDG_STATUS));
-	gtk_label_set_text(status, _("<b>Getting disc info from the internet...</b>"));
-	gtk_label_set_use_markup(status, TRUE);
+	set_status(_("<b>Getting disc info from the internet...</b>"));
 
 	while (g_atomic_int_get(&g_data->cddb_thread_running) != 0) {
 		GTK_REFRESH;
-		Sleep(200);
+		Sleep(THREAD_WAIT);
 	}
-	gtk_label_set_text(status, "CDDB query finished.");
+	set_status("CDDB query finished.");
 	enable_all_main_widgets();
 
 	cddb_destroy(g_data->cddb_conn);
@@ -1514,7 +1720,7 @@ static cddb_disc_t *read_disc(char *cdrom)
 	}
 	printf("] ");*/
 	gchar *b64 =g_base64_encode(buffer, digest_len);
-	//printf("BASE64 = %s\n", b64);
+	//printf("BASE64 = %s (len=%d)\n", b64, strlen(b64));
 	gchar *p = b64;
 	while(*p) {
 		if(*p == '+') *p = '.';
@@ -1522,7 +1728,7 @@ static cddb_disc_t *read_disc(char *cdrom)
 		if(*p == '=') *p = '-';
 		p++;
 	}
-	printf("Musicbrainz = http://musicbrainz.org/ws/2/discid/%s\n", b64);
+	strcpy(g_data->disc_id, b64);
 	g_free(b64);
 end:
 	close(fd);
@@ -1538,7 +1744,7 @@ static void update_tracklist(cddb_disc_t *disc)
 
 	if (disc_artist != NULL) {
 		SANITIZE(disc_artist);
-		SET_MAIN_TEXT("album_artist", disc_artist);
+		SET_MAIN_TEXT(WDG_ALBUM_ARTIST, disc_artist);
 
 		bool singleartist= true;
 		for (track = cddb_disc_get_track_first(disc);
@@ -1672,12 +1878,14 @@ static bool refresh(int force)
 	gtk_widget_set_sensitive(LKP_MAIN(WDG_RIP), TRUE);
 
 	// show the temporary info
-	SET_MAIN_TEXT("album_artist", "Unknown Artist");
-	SET_MAIN_TEXT("album_title", "Unknown Album");
+	SET_MAIN_TEXT(WDG_ALBUM_ARTIST, "Unknown Artist");
+	SET_MAIN_TEXT(WDG_ALBUM_TITLE, "Unknown Album");
 	update_tracklist(disc);
-	if (!g_prefs->do_cddb_updates && !force)
+	if (!g_prefs->do_cddb_updates && !force) {
+		enable_all_main_widgets();
+		set_gui_action(ACTION_READY, false);
 		return true;
-
+	}
 	lookup_disc(disc);
 	cddb_disc_destroy(disc);
 	if (g_data->disc_matches == NULL) {
@@ -1898,11 +2106,13 @@ static void on_folder_clicked(GtkButton *button, gpointer user_data)
 									NULL);
 
 	GtkFileChooser *chooser = GTK_FILE_CHOOSER(dlg);
+	// BUG : TODO set the current path the WDG_MUSIC_DIR
 	gtk_file_chooser_set_current_folder(chooser, g_prefs->music_dir);
 	if (gtk_dialog_run(GTK_DIALOG(chooser)) == GTK_RESPONSE_ACCEPT) {
 		gchar *folder_path = gtk_file_chooser_get_filename(chooser);
 		gtk_entry_set_text(GTK_ENTRY(LKP_PREF(WDG_MUSIC_DIR)), folder_path);
 		g_free(folder_path);
+		gfileinfo_cb((void*)1);
 	}
 	gtk_widget_destroy (dlg);
 }
@@ -1910,6 +2120,7 @@ static void on_folder_clicked(GtkButton *button, gpointer user_data)
 static void on_preferences_clicked(GtkToolButton *button, gpointer user_data)
 {
 	gtk_widget_show(win_prefs);
+	gfileinfo_cb((void*)2);
 }
 
 static void on_prefs_response(GtkDialog *dialog, gint response, gpointer data)
@@ -1918,6 +2129,11 @@ static void on_prefs_response(GtkDialog *dialog, gint response, gpointer data)
 		if (!prefs_are_valid()) return;
 		get_prefs_from_widgets(g_prefs);
 		save_prefs(g_prefs);
+		if(g_prefs->mb_lookup) {
+			enable_widget(WDG_SEEK);
+		} else {
+			disable_widget(WDG_SEEK);
+		}
 	}
 	gtk_widget_hide(GTK_WIDGET(dialog));
 }
@@ -1942,6 +2158,24 @@ static void on_press_f2(void)
 static void on_lookup_clicked(GtkToolButton *button, gpointer user_data)
 {
 	refresh(1);
+}
+
+static void on_seek_clicked(GtkToolButton *button, gpointer user_data)
+{
+	if(g_data->disc_id[0] == '\0') return;
+	if(!g_prefs->music_dir) return;
+	if(!is_directory(g_prefs->music_dir)) return;
+
+	disable_all_main_widgets();
+	gtk_widget_hide(LKP_MAIN(WDG_MAIN_PANEL));
+	gtk_widget_show(LKP_MAIN(WDG_IRON_PANEL));
+
+	GtkLabel *lbl = GTK_LABEL(LKP_MAIN(WDG_LBL_IRONSEEK));
+	gchar txt[SZENTRY];
+	snprintf(txt, SZENTRY, "Contacting web service at musicbrainz.org...\n\n"
+			"Disc id : <b>%s</b>", g_data->disc_id);
+	gtk_label_set_markup(lbl, txt);
+	g_thread_create(seek_thread, NULL, TRUE, NULL);
 }
 
 static bool lookup_cdparanoia()
@@ -2269,7 +2503,7 @@ static void show_aboutbox(void)
 						NULL };
 
 	gchar* comments = N_("An application to save tracks from an Audio CD"
-							" as WAV, FLAC and MP3.");
+							" as WAV, Ogg Vorbis, FLAC and MP3.");
 
 	gchar* copyright = {"Copyright 2005 Eric Lathrop (Asunder)\n"
 						"Copyright 2007 Andrew Smith (Asunder)\n"
@@ -2307,6 +2541,186 @@ static void on_about_clicked(GtkToolButton *button, gpointer user_data)
     show_aboutbox();
 }
 
+static GtkWidget *new_button_with_icon(GtkWidget *toolbar, const gchar* stock_id, gchar *text, gchar *tiptext)
+{
+	GtkWidget *btn = NULL;
+	if(text != NULL) {
+		GtkIconSize icon_size = gtk_toolbar_get_icon_size(GTK_TOOLBAR(toolbar));
+		GtkWidget *icon = gtk_image_new_from_stock(stock_id, icon_size);
+		gtk_widget_show(icon);
+		btn = (pWdg) gtk_tool_button_new(icon, text);
+	} else {
+		btn = (pWdg) gtk_tool_button_new_from_stock(stock_id);
+	}
+	if(tiptext != NULL) {
+		GtkTooltips *tip = gtk_tooltips_new();
+		gtk_tooltips_set_tip(tip, btn, tiptext, NULL);
+	}
+	gtk_widget_show(btn);
+	gtk_container_add(GTK_CONTAINER(toolbar), btn);
+	gboolean important = TRUE;
+	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(btn), important);
+	return btn;
+}
+
+static GtkWidget *new_separator(GtkWidget *toolbar, gboolean expand)
+{
+	GtkWidget *sep = (pWdg) gtk_separator_tool_item_new();
+	if(expand) {
+		gtk_tool_item_set_expand (GTK_TOOL_ITEM(sep), TRUE);
+		gtk_separator_tool_item_set_draw((GtkSeparatorToolItem *)sep, FALSE);
+	}
+	gtk_widget_show(sep);
+	gtk_container_add(GTK_CONTAINER(toolbar), sep);
+	return sep;
+}
+static GtkWidget *new_label(gchar *text)
+{
+	GtkWidget *p = gtk_label_new(_(text));
+	gtk_widget_show(p);
+	gtk_misc_set_alignment(GTK_MISC(p), 0, 0);
+	gtk_label_set_use_markup(GTK_LABEL(p), TRUE);
+	return p;
+}
+static GtkWidget *new_label_pack(GtkWidget *parent, int pad, gchar *text)
+{
+	GtkWidget *p = new_label(text);
+	BOXPACK(parent, p, FALSE, FALSE, pad);
+	return p;
+}
+static GtkWidget *new_entry()
+{
+	GtkWidget *p = gtk_entry_new();
+	gtk_widget_show(p);
+	return p;
+}
+static void set_tip(GtkWidget *widget, gchar *text)
+{
+	GtkTooltips *tip = gtk_tooltips_new();
+	gtk_tooltips_set_tip(tip, widget, _(text), NULL);
+}
+static GtkWidget *new_entry_with_tip(gchar *tip)
+{
+	GtkWidget *p = new_entry();
+	set_tip(p, tip);
+	return p;
+}
+static GtkWidget *new_vbox(int border_width)
+{
+	GtkWidget *p = gtk_vbox_new(FALSE, 0);
+	gtk_container_set_border_width(GTK_CONTAINER(p), border_width);
+	gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_hbox(int padding)
+{
+	GtkWidget *p = gtk_hbox_new(FALSE, padding);
+	gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_hbox_pack(GtkWidget *parent, int pad)
+{
+	GtkWidget *p = new_hbox(0);
+	BOXPACK(parent, p, FALSE, FALSE, pad);
+	return p;
+}
+static GtkWidget *new_checkbox(gchar *text, gboolean show)
+{
+	GtkWidget *p = gtk_check_button_new_with_mnemonic(_(text));
+	if(show) gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_checkbox_pack(GtkWidget *parent, gchar *text, int pad)
+{
+	GtkWidget *p = new_checkbox(text, 1);
+	BOXPACK(parent, p, FALSE, FALSE, pad);
+	return p;
+}
+static GtkWidget *new_button(const gchar* stock_id)
+{
+	GtkWidget *p = gtk_button_new_from_stock(stock_id);
+	GTK_WIDGET_SET_FLAGS(p, GTK_CAN_DEFAULT);
+	gtk_widget_show(p);
+	return p;
+}
+static GtkWidget *new_frame(gchar *label, GtkWidget *parent, gboolean expand)
+{
+	GtkWidget *p = gtk_frame_new(NULL);
+	gtk_widget_show(p);
+	if(label)
+		gtk_frame_set_label(GTK_FRAME(p), _(label));
+
+	if(!parent) return p;
+	if(expand) {
+		BOXPACK(parent, p, TRUE, TRUE, 0);
+	} else {
+		BOXPACK(parent, p, FALSE, FALSE, 0);
+	}
+	return p;
+}
+static GtkWidget *new_vframe(GtkWidget *parent, gchar *text)
+{
+	GtkWidget *frame = new_frame(text, parent, 0);
+	GtkWidget *p = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(frame), p);
+	return p;
+}
+static GtkWidget *new_cframe(GtkWidget *parent, GtkWidget *checkbox)
+{
+	GtkWidget *frame = new_frame(NULL, parent, 0);
+	gtk_frame_set_label_widget(GTK_FRAME(frame), checkbox);
+	GtkWidget *p = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(frame), p);
+	return p;
+}
+/*
+static GtkWidget *new_alignment(GtkWidget *frame)
+{
+	GtkWidget *p = gtk_alignment_new(0.5, 0.5, 1, 1);
+	gtk_widget_show(p);
+	gtk_container_add(GTK_CONTAINER(frame), p);
+	gtk_alignment_set_padding(GTK_ALIGNMENT(p), 1, 1, 8, 8);
+	return p;
+}
+*/
+static void append_tab(GtkWidget *notebook, GtkWidget *child, gchar *text)
+{
+	GtkNotebook *book = GTK_NOTEBOOK(notebook);
+	gtk_notebook_append_page(book, child, new_label(text));
+}
+static GtkWidget *new_table(GtkWidget *parent, int cols, int rows, GtkWidget **items)
+{
+	GtkWidget *p = gtk_table_new(rows, cols, FALSE);
+	gtk_widget_show(p);
+	BOXPACK(parent, p, TRUE, TRUE, 0);
+
+	GtkTable *t = GTK_TABLE(p);
+	for(int i=0; i<rows; i++) {
+		for(int j=0; j<cols; j++) {
+			gtk_table_attach(t, *items++, j, j+1, i, i+1,
+				  (j+1==cols) ? GTK_EXPAND_FILL : GTK_FILL, 0, 3, 1);
+		}
+	}
+	return p;
+}
+static GtkWidget *new_hscale(GtkWidget *parent, int min, int max)
+{
+	GtkWidget *p = gtk_hscale_new(GTK_ADJUSTMENT(gtk_adjustment_new(0, min, max+1, 1, 1, 1)));
+	gtk_widget_show (p);
+	gtk_scale_set_value_pos(GTK_SCALE(p), GTK_POS_RIGHT);
+	gtk_scale_set_digits(GTK_SCALE(p), 0);
+	BOXPACK(parent, p, TRUE, TRUE, 0);
+	return p;
+}
+static GtkCellRenderer *new_cell(GCallback cb)
+{
+	GtkCellRenderer *cell = gtk_cell_renderer_text_new();
+	if(cb) {
+		g_object_set(cell, "editable", TRUE, NULL);
+		CONNECT_SIGNAL(cell, "edited", cb);
+	}
+	return cell;
+}
 static GtkWidget *create_main(void)
 {
 	GtkWidget *main_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -2320,112 +2734,82 @@ static GtkWidget *create_main(void)
 	}
 	gtk_window_set_position(GTK_WINDOW(main_win), GTK_WIN_POS_CENTER);
 
-	GtkWidget *vbox1 = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(vbox1);
-	gtk_container_add(GTK_CONTAINER(main_win), vbox1);
+	GtkWidget *mainbox = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(main_win), mainbox);
 
 	GtkWidget *toolbar = gtk_toolbar_new();
 	gtk_widget_show(toolbar);
-	BOXPACK(vbox1, toolbar, FALSE, FALSE, 0);
+	BOXPACK(mainbox, toolbar, FALSE, FALSE, 0);
 	gtk_toolbar_set_style(GTK_TOOLBAR(toolbar), GTK_TOOLBAR_BOTH_HORIZ);
 
-	GtkIconSize icon_size = gtk_toolbar_get_icon_size(GTK_TOOLBAR(toolbar));
-	GtkWidget *icon = gtk_image_new_from_stock(GTK_STOCK_REFRESH, icon_size);
-	gtk_widget_show(icon);
-	GtkWidget *lookup = (pWdg) gtk_tool_button_new(icon, _("CDDB Lookup"));
-	GtkTooltips *tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, lookup,
-		_("Look up into the CDDB for information about this audio disc"), NULL);
-	gtk_widget_show(lookup);
-	gtk_container_add(GTK_CONTAINER(toolbar), lookup);
-	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(lookup), TRUE);
+	GtkWidget *lookup = new_button_with_icon(toolbar, GTK_STOCK_REFRESH,
+			_("CDDB Lookup"), _("Look up into the CDDB for information about this audio disc."));
+	gtk_widget_set_sensitive(lookup, FALSE);
 
-	GtkWidget *pref= (pWdg) gtk_tool_button_new_from_stock(GTK_STOCK_PREFERENCES);
-	gtk_widget_show(pref);
-	gtk_container_add(GTK_CONTAINER(toolbar), pref);
-	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(pref), TRUE);
+	GtkWidget *seek_button = new_button_with_icon(toolbar, GTK_STOCK_EXECUTE,
+			_("IronSeek"), _("Look up into MusicBrainz and Amazon for metadata and covers."));
+	gtk_widget_set_sensitive(seek_button, FALSE);
 
-	GtkWidget *sep = (pWdg) gtk_separator_tool_item_new();
-	gtk_widget_show(sep);
-	gtk_container_add(GTK_CONTAINER(toolbar), sep);
-
-	GtkWidget *rip_icon = gtk_image_new_from_stock(GTK_STOCK_CDROM, icon_size);
-	gtk_widget_show(rip_icon);
-	GtkWidget *rip_button = (pWdg) gtk_tool_button_new(rip_icon, _("Rip"));
-	gtk_widget_show(rip_button);
-	gtk_container_add(GTK_CONTAINER(toolbar), (pWdg) rip_button);
-	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(rip_button), TRUE);
+	GtkWidget *pref = new_button_with_icon(toolbar, GTK_STOCK_PREFERENCES, NULL, NULL);
+	new_separator(toolbar, FALSE);
+	GtkWidget *rip_button = new_button_with_icon(toolbar, GTK_STOCK_CDROM, _("Rip"), NULL);
 	// disable the "rip" button
 	// it will be enabled when a disc is found in the drive
 	gtk_widget_set_sensitive(rip_button, FALSE);
 
-	sep= (pWdg) gtk_separator_tool_item_new();
-	gtk_tool_item_set_expand (GTK_TOOL_ITEM(sep), TRUE);
-	gtk_separator_tool_item_set_draw((GtkSeparatorToolItem *)sep, FALSE);
-	gtk_widget_show(sep);
-	gtk_container_add(GTK_CONTAINER(toolbar), sep);
+	new_separator(toolbar, TRUE);
+	GtkWidget *about = new_button_with_icon(toolbar, GTK_STOCK_ABOUT, NULL, NULL);
 
-	GtkWidget *about = (pWdg) gtk_tool_button_new_from_stock(GTK_STOCK_ABOUT);
-	gtk_widget_show(about);
-	gtk_container_add(GTK_CONTAINER(toolbar), about);
-	gtk_tool_item_set_is_important(GTK_TOOL_ITEM(about), TRUE);
+	GtkWidget *vbox1 = new_vbox(0);
+	gtk_container_add(GTK_CONTAINER(mainbox), vbox1);
 
-	GtkWidget *table = gtk_table_new(3, 3, FALSE);
+	GtkWidget *ironbox = gtk_vbox_new(FALSE, 0);
+	gtk_container_add(GTK_CONTAINER(mainbox), ironbox);
+
+	GtkWidget *mb_label = new_label("Please wait...");
+	gtk_misc_set_alignment(GTK_MISC(mb_label), 0.5, 0.5);
+	BOXPACK(ironbox, mb_label, TRUE, TRUE, 3);
+
+	GtkWidget *table = gtk_table_new(4, 3, FALSE);
 	gtk_widget_show(table);
 	BOXPACK(vbox1, table, FALSE, TRUE, 3);
-
-	GtkWidget *album_artist = gtk_entry_new();
-	create_completion(album_artist, WDG_ALBUM_ARTIST);
-	gtk_widget_show(album_artist);
-
 	GtkTable *tbl = GTK_TABLE(table);
+
+	GtkWidget *album_artist = new_entry();
+	create_completion(album_artist, WDG_ALBUM_ARTIST);
 	gtk_table_attach(tbl, album_artist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
 
-	GtkWidget *album_title = gtk_entry_new();
-	gtk_widget_show(album_title);
+	GtkWidget *album_title = new_entry();
 	create_completion(album_title, WDG_ALBUM_TITLE);
 	gtk_table_attach(tbl, album_title, 1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
 
 	GtkWidget *pick_disc = gtk_combo_box_new();
 	gtk_table_attach(tbl, pick_disc, 1, 2, 0, 1, GTK_FILL, GTK_FILL, 0, 0);
 
-	GtkWidget *album_genre = gtk_entry_new();
+	GtkWidget *album_genre = new_entry();
 	create_completion(album_genre, WDG_ALBUM_GENRE);
-	gtk_widget_show(album_genre);
 	gtk_table_attach(tbl, album_genre, 1, 2, 3, 4, GTK_EXPAND_FILL, 0, 0, 0);
 
-	GtkWidget *disc = gtk_label_new(_("Disc:"));
+	GtkWidget *disc = gtk_label_new(_("Disc :"));
 	gtk_table_attach(tbl, disc, 0, 1, 0, 1, GTK_FILL, 0, 3, 0);
 	gtk_misc_set_alignment(GTK_MISC(disc), 0, 0.49);
 
-	GtkWidget *artist_label = gtk_label_new(_("Album Artist:"));
-	gtk_misc_set_alignment(GTK_MISC(artist_label), 0, 0);
-	gtk_widget_show(artist_label);
+	GtkWidget *artist_label = new_label("Album Artist :");
 	gtk_table_attach(tbl, artist_label, 0, 1, 1, 2, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *albumtitle_label = gtk_label_new(_("Album Title:"));
-	gtk_misc_set_alignment(GTK_MISC(albumtitle_label), 0, 0);
-	gtk_widget_show(albumtitle_label);
+	GtkWidget *albumtitle_label = new_label("Album Title :");
 	gtk_table_attach(tbl, albumtitle_label, 0, 1, 2, 3, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *single_artist = gtk_check_button_new_with_mnemonic(
-														_("Single Artist"));
-	gtk_widget_show(single_artist);
+	GtkWidget *single_artist = new_checkbox("Single Artist", 1);
 	gtk_table_attach(tbl, single_artist, 2, 3, 1, 2, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *genre_label = gtk_label_new(_("Genre / Year:"));
-	gtk_misc_set_alignment(GTK_MISC(genre_label), 0, 0);
-	gtk_widget_show(genre_label);
+	GtkWidget *genre_label = new_label("Genre / Year :");
 	gtk_table_attach(tbl, genre_label, 0, 1, 3, 4, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *single_genre = gtk_check_button_new_with_mnemonic(
-														_("Single Genre"));
-	//~ gtk_widget_show(single_genre);
-	//~ gtk_table_attach(GTK_TABLE(table2), single_genre, 2, 3, 3, 4,
-	//~  GTK_FILL, 0, 3, 0);
+	GtkWidget *single_genre = new_checkbox("Single Genre", 0);
+	gtk_table_attach(tbl, single_genre, 2, 3, 2, 3, GTK_FILL, 0, 3, 0);
 
-	GtkWidget *album_year = gtk_entry_new();
-	gtk_widget_show(album_year);
+	GtkWidget *album_year = new_entry();
 	gtk_table_attach(tbl, album_year, 2, 3, 3, 4, GTK_FILL, 0, 3, 0);
 
 	GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
@@ -2440,9 +2824,7 @@ static GtkWidget *create_main(void)
 	gtk_tree_view_set_rules_hint(tracktree, TRUE);
 	gtk_tree_view_set_enable_search(tracktree, FALSE);
 
-	GtkWidget *rip_box = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(rip_box);
-	gtk_container_set_border_width(GTK_CONTAINER(rip_box), 0);
+	GtkWidget *rip_box = new_vbox(0);
 	table = gtk_table_new(3, 2, FALSE);
 	gtk_widget_show(table);
 	BOXPACK(rip_box, table, FALSE, FALSE, 0);
@@ -2450,9 +2832,7 @@ static GtkWidget *create_main(void)
 	GtkWidget *progress_rip = ripping_bar(table,"Ripping", 1);
 	GtkWidget *progress_encode = ripping_bar(table,"Encoding", 2);
 
-	GtkWidget *cancel = gtk_button_new_from_stock(GTK_STOCK_CANCEL);
-	gtk_widget_show(cancel);
-	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
+	GtkWidget *cancel = new_button(GTK_STOCK_CANCEL);
 	GtkWidget *alignment_cancel= gtk_alignment_new(0.5, 0.5, 0.4, 1);
 	gtk_widget_show(alignment_cancel);
 	gtk_container_add(GTK_CONTAINER(alignment_cancel), cancel);
@@ -2468,36 +2848,29 @@ static GtkWidget *create_main(void)
 	// Set up all the columns for the track listing widget
 #define TRACK_INSERT(text,type,column) \
 	gtk_tree_view_insert_column_with_attributes(\
-			GTK_TREE_VIEW(tracklist), -1, text, cell, type, column, NULL)
+			GTK_TREE_VIEW(tracklist), -1, _(text), cell, type, column, NULL)
 
-	GtkCellRenderer *cell = NULL;
-	cell = gtk_cell_renderer_toggle_new();
+	GtkCellRenderer *cell = gtk_cell_renderer_toggle_new();
 	g_object_set(cell, "activatable", TRUE, NULL);
 	CONNECT_SIGNAL(cell, "toggled", on_rip_toggled);
-	TRACK_INSERT(_("Rip"), "active", COL_RIPTRACK);
+	TRACK_INSERT("Rip", "active", COL_RIPTRACK);
 	GtkTreeViewColumn *col = gtk_tree_view_get_column(tracktree, COL_RIPTRACK);
 	gtk_tree_view_column_set_clickable(col, TRUE);
 
-	cell = gtk_cell_renderer_text_new();
-	TRACK_INSERT(_("Track"), STR_TEXT, COL_TRACKNUM);
+	cell = new_cell(NULL);
+	TRACK_INSERT("Track", STR_TEXT, COL_TRACKNUM);
+
+	cell = new_cell(G_CALLBACK(on_artist_edited));
+	TRACK_INSERT("Artist", STR_TEXT, COL_TRACKARTIST);
+
+	cell = new_cell(G_CALLBACK(on_title_edited));
+	TRACK_INSERT("Title", STR_TEXT, COL_TRACKTITLE);
+
+	cell = new_cell(G_CALLBACK(on_genre_edited));
+	TRACK_INSERT("Genre", STR_TEXT, COL_GENRE);
 
 	cell = gtk_cell_renderer_text_new();
-	g_object_set(cell, "editable", TRUE, NULL);
-	CONNECT_SIGNAL(cell, "edited", on_artist_edited);
-	TRACK_INSERT(_("Artist"), STR_TEXT, COL_TRACKARTIST);
-
-	cell = gtk_cell_renderer_text_new();
-	g_object_set(cell, "editable", TRUE, NULL);
-	CONNECT_SIGNAL(cell, "edited", on_title_edited);
-	TRACK_INSERT(_("Title"), STR_TEXT, COL_TRACKTITLE);
-
-	cell = gtk_cell_renderer_text_new();
-	g_object_set(cell, "editable", TRUE, NULL);
-	CONNECT_SIGNAL(cell, "edited", on_genre_edited);
-	TRACK_INSERT(_("Genre"), STR_TEXT, COL_GENRE);
-
-	cell = gtk_cell_renderer_text_new();
-	TRACK_INSERT(_("Time"), STR_TEXT, COL_TRACKTIME);
+	TRACK_INSERT("Time", STR_TEXT, COL_TRACKTIME);
 
 	// set up the columns for the album selecting dropdown box
 	cell = gtk_cell_renderer_text_new();
@@ -2508,21 +2881,16 @@ static GtkWidget *create_main(void)
 	gtk_cell_layout_pack_start(disc_layout, cell, TRUE);
 	gtk_cell_layout_set_attributes(disc_layout, cell, STR_TEXT, 1, NULL);
 
-	// Bottom HBOX
-	GtkWidget *hbox5 = gtk_hbox_new(FALSE, 5);
-	BOXPACK(vbox1, hbox5, FALSE, TRUE, 5);
-	gtk_widget_show(hbox5);
-
-	GtkWidget *statusLbl = gtk_label_new("Welcome to " PROGRAM_NAME);
-	gtk_label_set_use_markup(GTK_LABEL(statusLbl), TRUE);
+	// Status line
+	GtkWidget *statusLbl = new_label("Welcome to " PROGRAM_NAME " v." VERSION);
 	gtk_misc_set_alignment(GTK_MISC(statusLbl), 0.02, 0.5);
-	BOXPACK(hbox5, statusLbl, TRUE, TRUE, 0);
-	gtk_widget_show(statusLbl);
+	BOXPACK(mainbox, statusLbl, FALSE, FALSE, 0);
 
 	CONNECT_SIGNAL(main_win, "delete_event", on_window_close);
 	CONNECT_SIGNAL(tracklist, "button-press-event", on_tracklist_clicked);
 	CONNECT_SIGNAL(col, "clicked", on_ripcol_clicked);
 	CONNECT_SIGNAL(lookup, "clicked", on_lookup_clicked);
+	CONNECT_SIGNAL(seek_button, "clicked", on_seek_clicked);
 	CONNECT_SIGNAL(pref, "clicked", on_preferences_clicked);
 	CONNECT_SIGNAL(about, "clicked", on_about_clicked);
 	CONNECT_SIGNAL(album_artist, "focus_out_event", on_album_artist_focus_out);
@@ -2566,6 +2934,8 @@ static GtkWidget *create_main(void)
 	HOOKUP(main_win, album_year, WDG_ALBUM_YEAR);
 	HOOKUP(main_win, disc, WDG_DISC);
 	HOOKUP(main_win, lookup, WDG_CDDB);
+	HOOKUP(main_win, seek_button, WDG_SEEK);
+	HOOKUP(main_win, mb_label, WDG_LBL_IRONSEEK);
 	HOOKUP(main_win, pick_disc, WDG_PICK_DISC);
 	HOOKUP(main_win, pref, WDG_PREFS);
 	HOOKUP(main_win, rip_button, WDG_RIP);
@@ -2578,6 +2948,8 @@ static GtkWidget *create_main(void)
 	HOOKUP(main_win, progress_rip, WDG_PROGRESS_RIP);
 	HOOKUP(main_win, progress_encode, WDG_PROGRESS_ENCODE);
 	HOOKUP(main_win, win_ripping, WDG_RIPPING);
+	HOOKUP(main_win, vbox1, WDG_MAIN_PANEL);
+	HOOKUP(main_win, ironbox, WDG_IRON_PANEL);
 	HOOKUP_NOREF(main_win, main_win, WDG_MAIN);
 
 	return main_win;
@@ -2585,518 +2957,234 @@ static GtkWidget *create_main(void)
 
 static GtkWidget *create_prefs(void)
 {
-	GtkWidget *prefs = gtk_dialog_new();
-	gtk_window_set_transient_for(GTK_WINDOW(prefs), GTK_WINDOW(win_main));
-	gtk_window_set_title(GTK_WINDOW(prefs), _("Preferences"));
-	gtk_window_set_modal(GTK_WINDOW(prefs), TRUE);
-	gtk_window_set_type_hint(GTK_WINDOW(prefs), GDK_WINDOW_TYPE_HINT_DIALOG);
+	pWdg vbox = NULL;
+	pWdg wbox = NULL;
 
-	GtkWidget *vbox = GTK_DIALOG(prefs)->vbox;
-	gtk_widget_show(vbox);
-
-	GtkWidget *notebook1 = gtk_notebook_new();
-	GtkNotebook *tabs = GTK_NOTEBOOK(notebook1);
-	gtk_widget_show(notebook1);
-	BOXPACK(vbox, notebook1, TRUE, TRUE, 0);
+	enum {GENERAL_TAB, FILENAMES_TAB, DRIVES_TAB, ENCODE_TAB, ADVANCED_TAB,
+			N_PREFS_TABS};
+	pWdg tab[N_PREFS_TABS];
 
 	/* GENERAL tab */
-	vbox = gtk_vbox_new(FALSE, 5);
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
-
-	GtkWidget *label = gtk_label_new(_("Destination folder"));
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-	gtk_widget_show(label);
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
-	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
-
-
-	GtkWidget *hbox = gtk_hbox_new(FALSE, 3);
-	gtk_widget_show(hbox);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
-	GtkWidget *music_folder = gtk_entry_new();
-	gtk_widget_show(music_folder);
+	vbox = tab[GENERAL_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "Destination folder");
+	pWdg hbox = new_hbox_pack(wbox, 0);
+	pWdg music_folder = new_entry_with_tip("Location of encoded files.");
 	BOXPACK(hbox, music_folder, TRUE, TRUE, 0);
-
-	GtkWidget *folder_btn =  gtk_button_new_with_label(" ... ");
+	pWdg folder_btn =  gtk_button_new_with_label(" ... ");
 	gtk_widget_show(folder_btn);
-	GtkTooltips *tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, folder_btn, _("Choose another folder"), NULL);
-
+	set_tip(folder_btn, "Choose another folder");
 	CONNECT_SIGNAL(folder_btn, "clicked", on_folder_clicked);
 	BOXPACK(hbox, folder_btn, FALSE, FALSE, 0);
+	hbox = new_hbox_pack(wbox, 2);
+	new_label_pack(hbox, 4, "Free space :");
+	pWdg fslabel = new_label_pack(hbox, 4, "(Not Available)");
+	pWdg make_m3u = new_checkbox_pack(vbox, "Create M3U playlist", 3);
+	pWdg always_overwrite = new_checkbox_pack(vbox, "Always overwrite output files", 3);
+	set_tip(always_overwrite, "Do not display confirmation dialog.");
+	pWdg use_notify = new_checkbox_pack(vbox, "Display desktop notifications", 2);
+	set_tip(use_notify, "This feature requires 'libnotify'.");
+	if(!g_data->has_notify) gtk_widget_set_sensitive(use_notify, FALSE);
+	pWdg mb_lookup = new_checkbox_pack(vbox, "Enable IronSeek engine (very experimental!)", 2);
+	set_tip(mb_lookup, "Look up into MusicBrainz for metadata and covers.");
+	/* END GENERAL tab */
 
-	GtkWidget *make_m3u = gtk_check_button_new_with_mnemonic(
-													_("Create M3U playlist"));
-	gtk_widget_show(make_m3u);
-	BOXPACK(vbox, make_m3u, FALSE, FALSE, 0);
+	/* FILENAMES tab */
+	vbox = tab[FILENAMES_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "Filename formats");
 
+	new_label_pack(wbox, 0, "%A - Artist\t" "%L - Album\t" "%G - Genre\n"
+						"%T - Song title\n"
+						"%N - Track number (2-digit)\n"
+						"%Y - Year (4-digit or \"0\")\n");
+
+	pWdg lbl_albumdir = new_label("Album directory :");
+	pWdg fmt_albumdir = new_entry_with_tip(
+			"This is relative to the destination folder\n"
+			" (from the General tab)." " Can be blank.\n"
+			"Default: %A - %L\n" "Other example: %A/%L");
+
+	pWdg lbl_playlist = new_label("Playlist file :");
+	pWdg fmt_playlist = new_entry_with_tip(
+			"This will be stored in the album directory.\n"
+			"Can be blank.\n" "Default: %A - %L");
+
+	pWdg lbl_music = new_label("Music file :");
+	pWdg fmt_music = new_entry_with_tip(
+			"This will be stored in the album directory.\n"
+			"Cannot be blank.\n" "Default: %A - %T\n"
+			"Other example: %N - %T");
+
+	pWdg items[] = { lbl_albumdir, fmt_albumdir, lbl_music, fmt_music,
+						 lbl_playlist, fmt_playlist };
+	new_table(wbox, 2, 3, items);
+	new_label_pack(wbox, 0, "\nTip: use lowercase letters for simplified names.");
+	/* END FILENAMES tab */
+
+	/* DRIVES tab */
+	vbox = tab[DRIVES_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "Device");
 	/* CDROM drives */
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
-	label = gtk_label_new(_("CD-ROM drives: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
-
-	GtkWidget *cdrom_drives = gtk_combo_box_new();
+	pWdg cdrom_drives = gtk_combo_box_new();
 	gtk_widget_show(cdrom_drives);
-	BOXPACK(hbox, cdrom_drives, TRUE, TRUE, 0);
-
 	GtkCellRenderer *p_cell = gtk_cell_renderer_text_new();
 	GtkCellLayout *layout = GTK_CELL_LAYOUT(cdrom_drives);
 	gtk_cell_layout_pack_start(layout, p_cell, FALSE);
 	gtk_cell_layout_set_attributes(layout, p_cell, "text", 1, NULL);
-
-
-	// PATH TO DEVICE
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(vbox, hbox, FALSE, FALSE, 0);
-	label = gtk_label_new(_("Path to device: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
-
-	GtkWidget *cdrom = gtk_entry_new();
-	gtk_widget_show(cdrom);
+	pWdg cdrom = new_entry_with_tip("Default: /dev/cdrom\n"
+					"Other example: /dev/hdc\n" "Other example: /dev/sr0");
 	gtk_widget_set_sensitive(cdrom, FALSE);
-	BOXPACK(hbox, cdrom, TRUE, TRUE, 0);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, cdrom, _("Default: /dev/cdrom\n"
-			"Other example: /dev/hdc\n" "Other example: /dev/sr0"), NULL);
 	CONNECT_SIGNAL(cdrom, "focus_out_event", on_cdrom_focus_out);
-
 	CONNECT_SIGNAL(cdrom_drives, "changed", on_s_drive_changed);
+
+	pWdg cells[] = { new_label("CD-ROM drives :"), cdrom_drives,
+							new_label("Path to device :"), cdrom };
+	new_table(wbox, 2, 2, cells);
+	pWdg eject_on_done = new_checkbox_pack(wbox, "Eject disc when finished", 4);
 	/* END of CDROM drives */
-
-	GtkWidget *eject_on_done = gtk_check_button_new_with_mnemonic(
-											_("Eject disc when finished"));
-	gtk_widget_show(eject_on_done);
-	BOXPACK(vbox, eject_on_done, FALSE, FALSE, 4);
-
-	GtkWidget *always_overwrite = gtk_check_button_new_with_mnemonic(
-										_("Always overwrite output files"));
-	gtk_widget_show(always_overwrite);
-	BOXPACK(vbox, always_overwrite, FALSE, FALSE, 4);
-
-	GtkWidget *rip_fast = gtk_check_button_new_with_mnemonic(
-										_("Cdparanoia fast mode"));
-	gtk_widget_show(rip_fast);
-	BOXPACK(vbox, rip_fast, FALSE, FALSE, 4);
-
-	label = gtk_label_new(_("General"));
-	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 0), label);
-	/* END GENERAL tab */
-
-	/* FILENAMES tab */
-	vbox = gtk_vbox_new(FALSE, 5);
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
-
-	GtkWidget *frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	vbox = gtk_vbox_new(FALSE, 0);
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(frame), vbox);
-
-	label = gtk_label_new(_("%A - Artist\n" "%L - Album\n"
-							"%N - Track number (2-digit)\n"
-							"%Y - Year (4-digit or \"0\")\n"
-							"%T - Song title"));
-	gtk_widget_show(label);
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-
-	label = gtk_label_new(_("%G - Genre"));
-	gtk_widget_show(label);
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-
-	// problem is that the same albumdir is used (threads.c) for all formats
-	//~ label = gtk_label_new (_("%F - Format (e.g. FLAC)"));
-	//~ gtk_widget_show (label);
-	//~ gtk_box_pack_start (GTK_BOX (vbox), label, FALSE, FALSE, 0);
-	//~ gtk_misc_set_alignment (GTK_MISC (label), 0, 0);
-
-	GtkWidget *table1 = gtk_table_new(3, 2, FALSE);
-	GtkTable *t = GTK_TABLE(table1);
-	gtk_widget_show(table1);
-	BOXPACK(vbox, table1, TRUE, TRUE, 0);
-
-	label = gtk_label_new(_("Album directory: "));
-	gtk_widget_show(label);
-	gtk_table_attach(t, label, 0, 1, 0, 1, GTK_FILL, 0, 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-
-	label = gtk_label_new(_("Playlist file: "));
-	gtk_widget_show(label);
-	gtk_table_attach(t, label, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-
-	label = gtk_label_new(_("Music file: "));
-	gtk_widget_show(label);
-	gtk_table_attach(t, label, 0, 1, 2, 3, GTK_FILL, 0, 0, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-
-	GtkWidget *fmt_albumdir = gtk_entry_new();
-	gtk_widget_show(fmt_albumdir);
-	gtk_table_attach(t, fmt_albumdir, 1, 2, 0, 1, GTK_EXPAND_FILL, 0, 0, 0);
-
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, fmt_albumdir,
-		_("This is relative to the destination folder (from the General tab).\n"
-		"Can be blank.\n" "Default: %A - %L\n" "Other example: %A/%L"), NULL);
-
-	GtkWidget *fmt_playlist = gtk_entry_new();
-	gtk_widget_show(fmt_playlist);
-	gtk_table_attach(t, fmt_playlist, 1, 2, 1, 2, GTK_EXPAND_FILL, 0, 0, 0);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, fmt_playlist,
-							_("This will be stored in the album directory.\n"
-							"Can be blank.\n" "Default: %A - %L"), NULL);
-
-	GtkWidget *fmt_music = gtk_entry_new();
-	gtk_widget_show(fmt_music);
-	gtk_table_attach(t, fmt_music, 1, 2, 2, 3, GTK_EXPAND_FILL, 0, 0, 0);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, fmt_music,
-							_("This will be stored in the album directory.\n"
-							"Cannot be blank.\n" "Default: %A - %T\n"
-							"Other example: %N - %T"), NULL);
-
-	label = gtk_label_new(_("\nTip: use lowercase letters for simplified names."));
-	gtk_widget_show(label);
-	BOXPACK(vbox, label, FALSE, FALSE, 0);
-	gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
-
-	label = gtk_label_new(_("Filename formats"));
-	gtk_widget_show(label);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), label);
-	gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
-
-	label = gtk_label_new(_("Filenames"));
-	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 1), label);
-	/* END FILENAMES tab */
+	wbox = new_vframe(vbox, "Cdparanoia options");
+	pWdg rip_fast = new_checkbox_pack(wbox, "Cdparanoia fast mode (not recommended)", 4);
+	set_tip(rip_fast, "Disable all data verification and correction features.\nThis is -Z mode in Cdparanoia. See man page.");
+	/* END DRIVES tab */
 
 	/* ENCODE tab */
-	vbox = gtk_vbox_new(FALSE, 0);
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
-
-	/* WAV */
-	frame = gtk_frame_new(NULL);
-	gtk_frame_set_label(GTK_FRAME(frame), _("Lossless formats"));
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-	GtkWidget *alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-	GtkWidget *wbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(wbox);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-
-	GtkWidget *rip_wav = gtk_check_button_new_with_label(
-										_("WAVE (uncompressed)"));
-	gtk_widget_show(rip_wav);
-	BOXPACK(wbox, rip_wav, FALSE, FALSE, 0);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, rip_wav,
-						_("Original sound quality, big size."), NULL);
-	/* END WAV */
-
-	/* FLAC */
-	GtkWidget *rip_flac = gtk_check_button_new_with_label(
-									_("FLAC (compressed)"));
-	gtk_widget_show(rip_flac);
-	BOXPACK(wbox, rip_flac, FALSE, FALSE, 0);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, rip_flac,
-						_("Original sound quality, smaller size."), NULL);
+	vbox = tab[ENCODE_TAB] = new_vbox(0);
+	/* LOSSLESS: WAV AND FLAC */
+	wbox = new_vframe(vbox, "Lossless formats");
+	pWdg rip_wav = new_checkbox_pack(wbox, "WAVE (uncompressed)", 2);
+	set_tip(rip_wav, "Original sound quality, big size.");
+	pWdg rip_flac = new_checkbox_pack(wbox, "FLAC (compressed)", 2);
+	set_tip(rip_flac, "Original sound quality, smaller size.");
 	CONNECT_SIGNAL(rip_flac, "toggled", on_rip_flac_toggled);
-	/* END FLAC */
-
 	/* MP3 */
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-
-	wbox = gtk_vbox_new(FALSE, 6);
-	gtk_widget_show(wbox);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-	GtkWidget *mp3_vbr = gtk_check_button_new_with_mnemonic(
-											_("Variable bit rate (VBR)"));
-	gtk_widget_show(mp3_vbr);
-	BOXPACK(wbox, mp3_vbr, FALSE, FALSE, 0);
+	pWdg rip_mp3 = new_checkbox("MP3 (lossy compression)", 1);
+	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
+	wbox = new_cframe(vbox, rip_mp3);
+	pWdg mp3_vbr = new_checkbox_pack(wbox, "Variable bit rate (VBR)", 1);
+	set_tip(mp3_vbr, "Better quality for the same size.");
 	CONNECT_SIGNAL(mp3_vbr, "toggled", on_vbr_toggled);
-
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, mp3_vbr,
-							_("Better quality for the same size."), NULL);
-
-	GtkWidget *hboxcombo = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hboxcombo);
-	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
-
-	GtkWidget *quality_label = gtk_label_new(_("Quality : "));
-	gtk_widget_show(quality_label);
-	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
-	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_MP3);
-
-	GtkWidget *mp3_quality = gtk_combo_box_new_text();
+	pWdg mp3_quality_lbl = new_label("Quality :");
+	pWdg mp3_quality = gtk_combo_box_new_text();
 	gtk_widget_show(mp3_quality);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, mp3_quality,
-						_("Choosing 'High quality' is recommended."), NULL);
-
+	set_tip(mp3_quality, "Choosing 'High quality' is recommended.");
 	GtkComboBox *cmb_mp3 = GTK_COMBO_BOX(mp3_quality);
 	gtk_combo_box_append_text(cmb_mp3, "Low quality");
 	gtk_combo_box_append_text(cmb_mp3, "Good quality");
 	gtk_combo_box_append_text(cmb_mp3, "High quality (recommended)");
 	gtk_combo_box_append_text(cmb_mp3, "Maximum quality");
 	gtk_combo_box_set_active(cmb_mp3, 2);
-	BOXPACK(hboxcombo, mp3_quality, FALSE, FALSE, 0);
 	CONNECT_SIGNAL(mp3_quality, "changed", on_mp3_quality_changed);
-
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(wbox, hbox, FALSE, FALSE, 0);
-
-	GtkWidget *bitrate_label = gtk_label_new(_("Bitrate : "));
-	gtk_widget_show(bitrate_label);
-	BOXPACK(hbox, bitrate_label, FALSE, FALSE, 0);
-	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
-
+	pWdg bitrate_label = new_label("Bitrate :");
 	int rate = mp3_quality_to_bitrate(g_prefs->mp3_quality,g_prefs->mp3_vbr);
 	gchar *kbps = g_strdup_printf(_("%dKbps"), rate);
-	label = gtk_label_new(kbps);
-	gtk_widget_show(label);
+	pWdg bitrate_value = new_label(kbps);
 	g_free(kbps);
-	BOXPACK(hbox, label, FALSE, FALSE, 0);
-	HOOKUP(prefs, label, WDG_BITRATE);
-
-	GtkWidget *rip_mp3 = gtk_check_button_new_with_mnemonic(
-												_("MP3 (lossy compression)"));
-	gtk_widget_show(rip_mp3);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), rip_mp3);
-	CONNECT_SIGNAL(rip_mp3, "toggled", on_rip_mp3_toggled);
-	/* END MP3 */
-
+	pWdg m3_items[] = { mp3_quality_lbl, mp3_quality, bitrate_label, bitrate_value };
+	new_table(wbox, 2, 2, m3_items);
 	// OGG
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	alignment = gtk_alignment_new(0.5, 0.5, 1, 1);
-	gtk_widget_show(alignment);
-	gtk_container_add(GTK_CONTAINER(frame), alignment);
-	gtk_alignment_set_padding(GTK_ALIGNMENT(alignment), 1, 1, 8, 8);
-
-	wbox = gtk_vbox_new(FALSE, 6);
-	gtk_widget_show(wbox);
-	gtk_container_add(GTK_CONTAINER(alignment), wbox);
-
-	hboxcombo = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hboxcombo);
-	BOXPACK(wbox, hboxcombo, FALSE, FALSE, 1);
-
-	quality_label = gtk_label_new(_("Quality : "));
-	gtk_widget_show(quality_label);
-	BOXPACK(hboxcombo, quality_label, FALSE, FALSE, 0);
-	HOOKUP(prefs, quality_label, WDG_LBL_QUALITY_OGG);
-
-	GtkWidget *ogg_quality = gtk_hscale_new (GTK_ADJUSTMENT (gtk_adjustment_new (6, 0, 11, 1, 1, 1)));
-	gtk_widget_show (ogg_quality);
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, ogg_quality,
-			_("Higher quality means bigger file. Default is 7 (recommended)."), NULL);
-
-	BOXPACK(hboxcombo, ogg_quality, TRUE, TRUE, 0);
-	gtk_scale_set_value_pos (GTK_SCALE (ogg_quality), GTK_POS_RIGHT);
-	gtk_scale_set_digits (GTK_SCALE (ogg_quality), 0);
-
-	GtkWidget *rip_ogg = gtk_check_button_new_with_mnemonic (_("OGG Vorbis (lossy compression)"));
-	gtk_widget_show (rip_ogg);
-	gtk_frame_set_label_widget (GTK_FRAME (frame), rip_ogg);
+	pWdg rip_ogg = new_checkbox("OGG Vorbis (lossy compression)", 1);
 	CONNECT_SIGNAL(rip_ogg, "toggled", on_rip_ogg_toggled);
-	// END OGG
-
-	label = gtk_label_new(_("Encode"));
-	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 2), label);
+	wbox = new_cframe(vbox, rip_ogg);
+	pWdg hboxcombo = new_hbox_pack(wbox, 1);
+	pWdg ogg_quality_lbl = new_label_pack(hboxcombo, 0, "Quality : ");
+	pWdg ogg_quality = new_hscale(hboxcombo, 0, 10);
+	set_tip(ogg_quality, "Higher quality means bigger file. Default is 7 (recommended).");
 	/* END ENCODE tab */
 
 	/* ADVANCED tab */
-	vbox = gtk_vbox_new(FALSE, 5);
-	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
-	gtk_widget_show(vbox);
-	gtk_container_add(GTK_CONTAINER(notebook1), vbox);
-
-	frame = gtk_frame_new(NULL);
-	gtk_frame_set_label(GTK_FRAME(frame), "CDDB");
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	GtkWidget *frameVbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(frameVbox);
-	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
-
-	GtkWidget *do_cddb_updates = gtk_check_button_new_with_mnemonic(
-						_("Get disc info from the internet automatically"));
-	gtk_widget_show(do_cddb_updates);
-	BOXPACK(frameVbox, do_cddb_updates, FALSE, FALSE, 0);
-
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
-
-	label = gtk_label_new(_("Server: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *cddbServerName = gtk_entry_new();
-	gtk_widget_show(cddbServerName);
-	BOXPACK(hbox, cddbServerName, TRUE, TRUE, 5);
-
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, cddbServerName,
-								_("The CDDB server to get disc info from"
-								   " (default is freedb.freedb.org)"), NULL);
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
-
-	label = gtk_label_new(_("Port: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *cddbPortNum = gtk_entry_new();
-	gtk_widget_show(cddbPortNum);
-	BOXPACK(hbox, cddbPortNum, TRUE, TRUE, 5);
-
-	tip = gtk_tooltips_new();
-	gtk_tooltips_set_tip(tip, cddbPortNum,
-						_("The CDDB server port (default is 8880)"), NULL);
-
-	GtkWidget *cddb_nocache = gtk_check_button_new_with_label(
-											_("Disable CDDB local cache"));
-	gtk_widget_show(cddb_nocache);
-	BOXPACK(frameVbox, cddb_nocache, FALSE, FALSE, 0);
-
-	frame = gtk_frame_new(NULL);
-	gtk_widget_show(frame);
-	BOXPACK(vbox, frame, FALSE, FALSE, 0);
-
-	GtkWidget *useProxy = gtk_check_button_new_with_mnemonic(
-							_("Use an HTTP proxy to connect to the internet"));
-	gtk_widget_show(useProxy);
-	gtk_frame_set_label_widget(GTK_FRAME(frame), useProxy);
-
-	frameVbox = gtk_vbox_new(FALSE, 0);
-	gtk_widget_show(frameVbox);
-	gtk_container_add(GTK_CONTAINER(frame), frameVbox);
-
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
-
-	label = gtk_label_new(_("Server: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *serverName = gtk_entry_new();
-	gtk_widget_show(serverName);
-	BOXPACK(hbox, serverName, TRUE, TRUE, 5);
-
-	hbox = gtk_hbox_new(FALSE, 0);
-	gtk_widget_show(hbox);
-	BOXPACK(frameVbox, hbox, FALSE, FALSE, 1);
-
-	label = gtk_label_new(_("Port: "));
-	gtk_widget_show(label);
-	BOXPACK(hbox, label, FALSE, FALSE, 5);
-
-	GtkWidget *portNum = gtk_entry_new();
-	gtk_widget_show(portNum);
-	BOXPACK(hbox, portNum, TRUE, TRUE, 5);
-
+	vbox = tab[ADVANCED_TAB] = new_vbox(0);
+	wbox = new_vframe(vbox, "CDDB");
+	pWdg do_cddb_updates = new_checkbox_pack(wbox,
+						"Get disc info from the internet automatically", 0);
+	pWdg cddbServerName = new_entry_with_tip(
+									"The CDDB server to get disc info from"
+									" (default is freedb.freedb.org)");
+	pWdg cddbPortNum = new_entry_with_tip(
+									"The CDDB server port (default is 8880)");
+	pWdg cddb_items[] = { new_label("CDDB server :"), cddbServerName,
+								new_label("CDDB port :"), cddbPortNum };
+	new_table(wbox, 2, 2, cddb_items);
+	pWdg cddb_nocache = new_checkbox_pack(wbox, "Disable CDDB local cache", 0);
+	pWdg useProxy = new_checkbox("Use an HTTP proxy to connect to the internet", 1);
+	wbox = new_cframe(vbox, useProxy);
+	pWdg serverName = new_entry_with_tip("Proxy server address");
+	pWdg portNum = new_entry_with_tip("Proxy server port number");
+	pWdg proxy_items[] = { new_label("Proxy server :"), serverName,
+								new_label("Proxy port :"), portNum };
+	new_table(wbox, 2, 2, proxy_items);
 	gchar *lbl = g_strdup_printf("Log to %s", g_prefs->log_file);
-	GtkWidget *log_file = gtk_check_button_new_with_label(lbl);
-	gtk_widget_show(log_file);
-	BOXPACK(vbox, log_file, FALSE, FALSE, 0);
+	pWdg log_file = new_checkbox_pack(vbox, lbl, 0);
 	g_free(lbl);
-
-	label = gtk_label_new(_("Advanced"));
-	gtk_widget_show(label);
-	gtk_notebook_set_tab_label(tabs, gtk_notebook_get_nth_page(tabs, 3), label);
 	/* END ADVANCED tab */
 
-	GtkWidget *action_area = GTK_DIALOG(prefs)->action_area;
+	/* SET NOTEBOOK TABS */
+	pWdg notebook = gtk_notebook_new();
+	gtk_widget_show(notebook);
+	append_tab(notebook, tab[GENERAL_TAB], "General");
+	append_tab(notebook, tab[FILENAMES_TAB], "Filenames");
+	append_tab(notebook, tab[DRIVES_TAB], "Audio CD");
+	append_tab(notebook, tab[ENCODE_TAB], "Encode");
+	append_tab(notebook, tab[ADVANCED_TAB], "Advanced");
+
+	/* CREATE PREFS DIALOG */
+	pWdg prefs = gtk_dialog_new();
+	gtk_window_set_transient_for(GTK_WINDOW(prefs), GTK_WINDOW(win_main));
+	gtk_window_set_title(GTK_WINDOW(prefs), _("Preferences"));
+	gtk_window_set_modal(GTK_WINDOW(prefs), TRUE);
+	gtk_window_set_type_hint(GTK_WINDOW(prefs), GDK_WINDOW_TYPE_HINT_DIALOG);
+	BOXPACK(GTK_DIALOG(prefs)->vbox, notebook, TRUE, TRUE, 0);
+
+	/* ACTION BUTTONS */
+	pWdg action_area = GTK_DIALOG(prefs)->action_area;
 	gtk_widget_show(action_area);
 	gtk_button_box_set_layout(GTK_BUTTON_BOX(action_area), GTK_BUTTONBOX_END);
-
-	GtkWidget *cancel = gtk_button_new_from_stock(GTK_STOCK_CANCEL);
-	gtk_widget_show(cancel);
+	pWdg cancel = new_button(GTK_STOCK_CANCEL);
 	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), cancel, GTK_RESPONSE_CANCEL);
-	GTK_WIDGET_SET_FLAGS(cancel, GTK_CAN_DEFAULT);
-
-	GtkWidget *ok = gtk_button_new_from_stock(GTK_STOCK_OK);
-	gtk_widget_show(ok);
+	pWdg ok = new_button(GTK_STOCK_OK);
 	gtk_dialog_add_action_widget(GTK_DIALOG(prefs), ok, GTK_RESPONSE_OK);
-	GTK_WIDGET_SET_FLAGS(ok, GTK_CAN_DEFAULT);
-
 	CONNECT_SIGNAL(prefs, "response", on_prefs_response);
 	CONNECT_SIGNAL(prefs, "realize", on_prefs_show);
+	/* END OF ACTION BUTTONS */
 
 	/* Store pointers to all widgets, for use by lookup_widget(). */
 	HOOKUP_NOREF(prefs, prefs, "prefs");
-	HOOKUP(prefs, cddbServerName, "cddb_server_name");
+	HOOKUP(prefs, always_overwrite, "always_overwrite");
+	HOOKUP(prefs, bitrate_label, WDG_LBL_BITRATE);
+	HOOKUP(prefs, bitrate_value, WDG_BITRATE);
 	HOOKUP(prefs, cddbPortNum, "cddb_port");
-	HOOKUP(prefs, useProxy, "use_proxy");
-	HOOKUP(prefs, serverName, "server_name");
-	HOOKUP(prefs, portNum, "port_number");
-	HOOKUP(prefs, log_file, "do_log");
+	HOOKUP(prefs, cddbServerName, "cddb_server_name");
 	HOOKUP(prefs, cddb_nocache, "cddb_nocache");
-	HOOKUP(prefs, music_folder, WDG_MUSIC_DIR);
-	HOOKUP(prefs, make_m3u, "make_playlist");
 	HOOKUP(prefs, cdrom, "cdrom");
 	HOOKUP(prefs, cdrom_drives, WDG_CDROM_DRIVES);
+	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
 	HOOKUP(prefs, eject_on_done, "eject_on_done");
-	HOOKUP(prefs, always_overwrite, "always_overwrite");
-	HOOKUP(prefs, rip_fast, "rip_fast");
-	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_albumdir, WDG_FMT_ALBUMDIR);
+	HOOKUP(prefs, fmt_music, WDG_FMT_MUSIC);
 	HOOKUP(prefs, fmt_playlist, WDG_FMT_PLAYLIST);
-	HOOKUP(prefs, rip_wav, "rip_wav");
-	HOOKUP(prefs, rip_flac, "rip_flac");
-	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
+	HOOKUP(prefs, fslabel, WDG_LBL_FREESPACE);
+	HOOKUP(prefs, log_file, "do_log");
+	HOOKUP(prefs, make_m3u, "make_playlist");
+	HOOKUP(prefs, mb_lookup, "mb_lookup");
 	HOOKUP(prefs, mp3_quality, WDG_MP3_QUALITY);
+	HOOKUP(prefs, mp3_quality_lbl, WDG_LBL_QUALITY_MP3);
+	HOOKUP(prefs, mp3_vbr, WDG_MP3VBR);
+	HOOKUP(prefs, music_folder, WDG_MUSIC_DIR);
 	HOOKUP(prefs, ogg_quality, WDG_OGG_QUALITY);
+	HOOKUP(prefs, ogg_quality_lbl, WDG_LBL_QUALITY_OGG);
+	HOOKUP(prefs, portNum, "port_number");
+	HOOKUP(prefs, rip_fast, "rip_fast");
+	HOOKUP(prefs, rip_flac, "rip_flac");
 	HOOKUP(prefs, rip_mp3, "rip_mp3");
 	HOOKUP(prefs, rip_ogg, "rip_ogg");
-	HOOKUP(prefs, do_cddb_updates, "do_cddb_updates");
+	HOOKUP(prefs, rip_wav, "rip_wav");
+	HOOKUP(prefs, serverName, "server_name");
+	HOOKUP(prefs, useProxy, "use_proxy");
+	HOOKUP(prefs, use_notify, "use_notify");
 	return prefs;
 }
 
 static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
 	GtkTable *t = GTK_TABLE(table);
-	GtkWidget *label = gtk_label_new(_(name));
-	gtk_widget_show(label);
+	GtkWidget *label = new_label(name);
 	gtk_table_attach(t, label, 0, 1, y, y+1, GTK_FILL, 0, 5, 10);
 	gtk_misc_set_alignment(GTK_MISC(label), 0, 0.5);
 	GtkWidget *progress = gtk_progress_bar_new();
@@ -3105,22 +3193,15 @@ static GtkWidget *ripping_bar(GtkWidget *table, char *name, int y) {
 	return progress;
 }
 
-static void enable_widget(char *name) {
-	gtk_widget_set_sensitive(LKP_MAIN(name), TRUE);
-}
-
-static void disable_widget(char *name) {
-	gtk_widget_set_sensitive(LKP_MAIN(name), FALSE);
-}
-
 static void disable_all_main_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
+	disable_widget(WDG_TRACKLIST);
 	disable_widget(WDG_DISC);
 	disable_widget(WDG_LBL_GENRE);
 	disable_widget(WDG_LBL_ALBUMTITLE);
 	disable_widget(WDG_LBL_ARTIST);
 	disable_widget(WDG_CDDB);
+	disable_widget(WDG_SEEK);
 	disable_widget(WDG_PREFS);
 	disable_widget(WDG_RIP);
 	disable_widget(WDG_SINGLE_ARTIST);
@@ -3134,12 +3215,13 @@ static void disable_all_main_widgets(void)
 
 static void disable_lookup_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), FALSE);
+	disable_widget(WDG_TRACKLIST);
 	disable_widget(WDG_DISC);
 	disable_widget(WDG_LBL_GENRE);
 	disable_widget(WDG_LBL_ALBUMTITLE);
 	disable_widget(WDG_LBL_ARTIST);
 	disable_widget(WDG_CDDB);
+	disable_widget(WDG_SEEK);
 	disable_widget(WDG_RIP);
 	disable_widget(WDG_SINGLE_ARTIST);
 	disable_widget(WDG_SINGLE_GENRE);
@@ -3152,12 +3234,13 @@ static void disable_lookup_widgets(void)
 
 static void enable_all_main_widgets(void)
 {
-	gtk_widget_set_sensitive(LKP_MAIN(WDG_TRACKLIST), TRUE);
+	enable_widget(WDG_TRACKLIST);
 	enable_widget(WDG_DISC);
 	enable_widget(WDG_LBL_GENRE);
 	enable_widget(WDG_LBL_ALBUMTITLE);
 	enable_widget(WDG_LBL_ARTIST);
 	enable_widget(WDG_CDDB);
+	if(g_prefs->mb_lookup) enable_widget(WDG_SEEK);
 	enable_widget(WDG_PREFS);
 	enable_widget(WDG_RIP);
 	enable_widget(WDG_SINGLE_ARTIST);
@@ -3201,17 +3284,29 @@ static void show_completed_dialog()
 #define CREATOK " created successfully"
 #define CREATKO "There was an error creating "
 
-	int numOk = g_data->numCdparanoiaOk
-				+ g_data->numLameOk + g_data->numFlacOk;
+	int numOk = g_data->numCdparanoiaOk + g_data->numLameOk
+					+ g_data->numOggOk + g_data->numFlacOk;
 
-	int numFailed = g_data->numCdparanoiaFailed
-				+ g_data->numLameFailed + g_data->numFlacFailed;
+	int numFailed = g_data->numCdparanoiaFailed + g_data->numLameFailed
+					+ g_data->numOggFailed + g_data->numFlacFailed;
 
     if(numFailed > 0) {
+		if(g_prefs->use_notify) {
+			gchar *m = g_strdup_printf(ngettext(CREATKO "%d file", CREATKO "%d files", numFailed), numFailed);
+			notify(m);
+			g_free(m);
+		}
 		DIALOG_WARNING_CLOSE(
 				ngettext(CREATKO "%d file", CREATKO "%d files", numFailed),
 				numFailed);
 	} else {
+		if(g_prefs->use_notify) {
+			gchar *m = g_strdup_printf(
+						ngettext("%d file" CREATOK, "%d files" CREATOK, numOk),
+						numOk);
+			notify(m);
+			g_free(m);
+		}
 		DIALOG_INFO_CLOSE(
 				ngettext("%d file" CREATOK, "%d files" CREATOK, numOk),
 				numOk);
@@ -3240,6 +3335,8 @@ static prefs *get_default_prefs()
 	}
 	p->eject_on_done = 0;
 	p->always_overwrite = 0;
+	p->use_notify = 0;
+	p->mb_lookup = 0;
 	p->rip_fast = 0;
 	p->main_window_height = 380;
 	p->main_window_width = 520;
@@ -3312,6 +3409,8 @@ static void set_widgets_from_prefs(prefs *p)
 	set_pref_toggle("do_log", p->do_log);
 	set_pref_toggle("eject_on_done", p->eject_on_done);
 	set_pref_toggle("always_overwrite", p->always_overwrite);
+	set_pref_toggle("use_notify", p->use_notify);
+	set_pref_toggle("mb_lookup", p->mb_lookup);
 	set_pref_toggle("rip_fast", p->rip_fast);
 	set_pref_toggle("make_playlist", p->make_playlist);
 	set_pref_toggle(WDG_MP3VBR, p->mp3_vbr);
@@ -3413,6 +3512,8 @@ static void get_prefs_from_widgets(prefs *p)
 	p->mp3_vbr = get_pref_toggle(WDG_MP3VBR);
 	p->eject_on_done = get_pref_toggle("eject_on_done");
 	p->always_overwrite = get_pref_toggle("always_overwrite");
+	p->use_notify = get_pref_toggle("use_notify");
+	p->mb_lookup = get_pref_toggle("mb_lookup");
 	p->rip_fast = get_pref_toggle("rip_fast");
 	p->do_cddb_updates = get_pref_toggle("do_cddb_updates");
 	p->use_proxy = get_pref_toggle("use_proxy");
@@ -3478,6 +3579,8 @@ static void save_prefs(prefs *p)
 	fprintf(fd, "WINDOW_HEIGHT=%d\n", p->main_window_height);
 	fprintf(fd, "EJECT=%d\n", p->eject_on_done);
 	fprintf(fd, "OVERWRITE=%d\n", p->always_overwrite);
+	fprintf(fd, "NOTIFY=%d\n", p->use_notify);
+	fprintf(fd, "SEEK_MUSICBRAINZ=%d\n", p->mb_lookup);
 	fprintf(fd, "CDPARANOIA_ZMODE=%d\n", p->rip_fast);
 	fprintf(fd, "CDDB_UPDATE=%d\n", p->do_cddb_updates);
 	fprintf(fd, "USE_PROXY=%d\n", p->use_proxy);
@@ -3561,6 +3664,8 @@ static void load_prefs()
 	get_field_as_szentry(s, file, "LOG_FILE", p->log_file);
 	get_field_as_long(s,file,"EJECT", &(p->eject_on_done));
 	get_field_as_long(s,file,"OVERWRITE", &(p->always_overwrite));
+	get_field_as_long(s,file,"NOTIFY", &(p->use_notify));
+	get_field_as_long(s,file,"SEEK_MUSICBRAINZ", &(p->mb_lookup));
 	get_field_as_long(s,file,"CDPARANOIA_ZMODE", &(p->rip_fast));
 	get_field_as_long(s,file,"CDDB_UPDATE", &(p->do_cddb_updates));
 	get_field_as_long(s,file,"USE_PROXY",&(p->use_proxy));
@@ -3592,13 +3697,12 @@ static void load_prefs()
 // it will make sure it always points to a nice directory
 static char *prefs_get_music_dir(prefs *p)
 {
-	struct stat s;
-	if (stat(p->music_dir, &s) == 0) {
+	if(is_directory(p->music_dir)) {
 		return p->music_dir;
 	}
 	gchar *newdir = get_default_music_dir();
 	if(strcmp(newdir,p->music_dir)) {
-		DIALOG_ERROR_OK("The music directory '%s' does not exist.\n\n"
+		DIALOG_ERROR_OK("The music directory '%s' does not exist (or the path does not lead to a directory).\n\n"
 				"The music directory will be reset to '%s'.", p->music_dir, newdir);
 		szcopy(p->music_dir, newdir);
 	}
@@ -3684,14 +3788,10 @@ static bool confirmOverwrite(const char *pathAndName)
 
 	gchar *m = g_strdup_printf(_("The file '%s' already exists."
 								" Do you want to overwrite it?\n"), lastSlash);
-	GtkWidget *label = gtk_label_new(m);
+	BOXPACK(GTK_DIALOG(dialog)->vbox, new_label(m), TRUE, TRUE, 0);
 	g_free(m);
-	gtk_widget_show(label);
-	BOXPACK(GTK_DIALOG(dialog)->vbox, label, TRUE, TRUE, 0);
 
-	GtkWidget *checkbox = gtk_check_button_new_with_mnemonic(
-			_("Remember the answer for _all the files made from this CD"));
-	gtk_widget_show(checkbox);
+	GtkWidget *checkbox = new_checkbox("Remember the answer for _all the files made from this CD", 1);
 	BOXPACK(GTK_DIALOG(dialog)->vbox, checkbox, TRUE, TRUE, 0);
 
 	int rc = gtk_dialog_run(GTK_DIALOG(dialog));
@@ -3732,7 +3832,7 @@ static void abort_threads()
 			|| g_data->lame_pid != 0
 			|| g_data->oggenc_pid != 0
 			|| g_data->flac_pid != 0) {
-        Sleep(200);
+        Sleep(THREAD_WAIT);
 		TRACEINFO("cdparanoia=%d lame=%d ogg=%d flac=%d", g_data->cdparanoia_pid,
 						g_data->lame_pid, g_data->oggenc_pid, g_data->flac_pid);
     }
@@ -3743,7 +3843,7 @@ static void abort_threads()
     // gdk_flush();
     g_data->working = false;
     show_completed_dialog();
-    gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
+    gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME " v." VERSION);
     gtk_widget_hide(LKP_MAIN(WDG_RIPPING));
 	gtk_widget_show(LKP_MAIN(WDG_SCROLL));
 	enable_all_main_widgets();
@@ -3807,6 +3907,8 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 	// note: only use the "[wrote]" numbers
 	char buf[256];
 	int size = 0;
+	int start = 0;
+	int end = 0;
 	do {
 		int pos = -1;
 		do {
@@ -3834,17 +3936,15 @@ static void cdparanoia(char *cdrom, int tracknum, char *filename)
 			}
 		} while ((buf[pos] != '\n') && (size > 0) && (pos < 256));
 		buf[pos] = '\0';
-		// printf("%s\n", buf);
-		int start;
-		int end;
-		int sector;
+
 		if ((buf[0] == 'R') && (buf[1] == 'i')) {
 			sscanf(buf, "Ripping from sector %d", &start);
 		} else if (buf[0] == '\t') {
 			sscanf(buf, "\t to sector %d", &end);
 		} else if (buf[0] == '#') {
-			int code;
+			int code = 0;
 			char type[200];
+			int sector = 0;
 			sscanf(buf, "##: %d %s @ %d", &code, type, &sector);
 			sector /= 1176;
 			if (strncmp("[wrote]", type, 7) == 0) {
@@ -3982,8 +4082,12 @@ static void reset_counters()
 	g_data->encode_tracks_completed = 0;
 	g_data->numCdparanoiaFailed = 0;
 	g_data->numLameFailed = 0;
+	g_data->numOggFailed = 0;
+	g_data->numFlacFailed = 0;
 	g_data->numCdparanoiaOk = 0;
 	g_data->numLameOk = 0;
+	g_data->numOggOk = 0;
+	g_data->numFlacOk = 0;
 	g_data->rip_percent = 0.0;
 }
 
@@ -4213,7 +4317,6 @@ static void lamehq(int tracknum, char *artist, char *album, char *title,
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->lame_pid);
 	read_from_encoder(LAME, fd);
 	close(fd);
-	Sleep(200);
 	sigchld();
 }
 
@@ -4261,7 +4364,6 @@ static void oggenc(int tracknum, char *artist, char *album, char *title,
 	int fd = exec_with_output(args, STDERR_FILENO, &g_data->oggenc_pid);
 	read_from_encoder(OGGENC, fd);
 	close(fd);
-	Sleep(200);
 	sigchld();
 }
 
@@ -4337,7 +4439,6 @@ static void flac(int tracknum, char *artist, char *album, char *title,
 	g_free(title_text);
 	g_free(genre_text);
 	g_free(year_text);
-	Sleep(200);
 	sigchld();
 }
 
@@ -4561,9 +4662,11 @@ static gpointer encode_thread(gpointer data)
 			|| g_data->oggenc_pid != 0
 			|| g_data->flac_pid != 0) {
 		// printf("w2\n");
-		Sleep(200);
+		Sleep(THREAD_WAIT);
 	}
+	// Update progress bar again before AllDone ??
 	TRACEINFO("Waking up to allDone");
+	Sleep(REFRESH_INTERVAL*3);
 	g_data->allDone = true;		// so the tracker thread will exit
 	g_data->working = false;
 	set_gui_action(ACTION_ENCODED, true);
@@ -4597,13 +4700,12 @@ static gpointer track_thread(gpointer data)
 				|| g_data->flac_percent <= 0.0
 				|| g_data->ogg_percent <= 0.0
 				|| g_data->mp3_percent <= 0.0)) {
-			Sleep(200);
+			Sleep(THREAD_WAIT);
 			continue;
 		}
 		started = true;
 		torip = g_data->tracks_to_rip;
 		completed = g_data->rip_tracks_completed;
-
 		g_data->prip = (completed + g_data->rip_percent) / torip;
 		snprintf(g_data->srip, 32, "%02.2f%% (%d/%d)", (g_data->prip * 100),
 				(completed < torip) ? (completed + 1) : torip, torip);
@@ -4636,13 +4738,23 @@ static gpointer track_thread(gpointer data)
 			g_thread_exit(NULL);
 		}
 		set_gui_action(ACTION_UPDATE_PBAR, false);
-		Sleep(200);
+		Sleep(REFRESH_INTERVAL);
 	}
 	set_gui_action(ACTION_READY, true);
 	TRACEINFO("The End.");
 	return NULL;
 }
-
+static gpointer seek_thread(gpointer data)
+{
+	set_gui_action(ACTION_SEEKSTART, true);
+	mbresult_t res;
+	if(musicbrainz_lookup(g_data->disc_id, &res)) {
+		musicbrainz_scan(&res, g_prefs->music_dir);
+	}
+	mb_free(&res);
+	set_gui_action(ACTION_SEEKEND, false);
+	return NULL;
+}
 // signal handler to find out when our child has exited
 static void sigchld()
 {
@@ -4784,7 +4896,7 @@ static gboolean cb_gui_update(gpointer data)
 
 		case ACTION_READY:
 			set_status("Ready.");
-			gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME);
+			gtk_window_set_title(GTK_WINDOW(win_main), PROGRAM_NAME " v." VERSION);
 			g_data->action = NO_ACTION;
 			break;
 
@@ -4807,11 +4919,1120 @@ static gboolean cb_gui_update(gpointer data)
 			fmt_status("Trying to eject disc in '%s'...", g_data->device);
 			g_data->action = NO_ACTION;
 			break;
+
+		case ACTION_FREESPACE:
+			{
+				GtkLabel *lbl = GTK_LABEL(LKP_PREF(WDG_LBL_FREESPACE));
+				gtk_label_set_markup(lbl, g_data->label_space);
+			}
+			g_data->action = NO_ACTION;
+			break;
+
+		case ACTION_SEEKSTART:
+			set_status("Please wait...");
+			g_data->action = NO_ACTION;
+			break;
+
+		case ACTION_SEEKEND:
+			enable_all_main_widgets();
+			set_status("Search finished.");
+			gtk_widget_hide(LKP_MAIN(WDG_IRON_PANEL));
+			gtk_widget_show(LKP_MAIN(WDG_MAIN_PANEL));
+			g_data->action = NO_ACTION;
+			break;
 	}
 	g_cond_signal(g_data->updated);
 unlock:
 	g_mutex_unlock(g_data->monolock);
 	return TRUE;
+}
+
+#ifdef NDEBUG
+  #define dprintf(s)  printf("%s:%d: %s: %s\n",__FILE__,__LINE__,__func__,s)
+#else
+  #define dprintf(s)
+#endif
+
+#define M_ArrayLen(a) (sizeof(a) / sizeof(a[0]))
+
+typedef struct xmlnode *xmlnode_t;
+bool        XmlParseFd(struct xmlnode **n,int fd);
+const char *XmlParseStr(struct xmlnode **n,const char *s);
+const char *XmlGetTag(struct xmlnode *n);
+const char *XmlGetAttribute(struct xmlnode *n, const char *attr);
+const char *XmlGetContent(struct xmlnode *n);
+int         XmlTagStrcmp(struct xmlnode *n, const char *str);
+struct xmlnode *XmlFindSubNode(struct xmlnode *n, const char *tag);
+struct xmlnode *XmlFindSubNodeFree(struct xmlnode *n, const char *tag);
+void XmlDestroy(struct xmlnode **n);
+
+struct xmlnode {
+    char *tag;
+    char *content;
+    char *attributes;
+    void    *freeList[16];
+    uint32_t freeListLen;
+    bool        converted;
+    int         fd;
+    const char *array;
+};
+
+/** Skip space characters in the passed string.
+ *
+ * \returns Pointer to the first non-space character in \a s, which maybe a nul.
+ */
+static const char *skipSpace(const char *s)
+{
+	while (isspace(*s)) {
+		s++;
+	}
+	return s;
+}
+
+static void convert(char *s)
+{
+	char *sIn = s;
+	char *sOut = s;
+
+	do {
+		while (*sIn != '&' && *sIn != '\0') {
+			*sOut = *sIn;
+			sIn++;
+			sOut++;
+		}
+		if (*sIn == '&') {
+			static const struct {
+				const char *token;
+				const uint8_t len;
+				const char *substitution;
+			} replacements[] = {
+				{
+				"&quot;", 6, "\""}, {
+				"&apos;", 6, "'"}, {
+				"&amp;", 5, "&"}, {
+				"&lt;", 4, "<"}, {
+				"&gt;", 4, ">"}
+			};
+
+			uint8_t t;
+			for (t = 0; t < M_ArrayLen(replacements); t++) {
+				if (strncasecmp(sIn, replacements[t].token, replacements[t].len) == 0) {
+					break;
+				}
+			}
+			if (t < M_ArrayLen(replacements)) {
+				sIn += replacements[t].len;
+				strcpy(sOut, replacements[t].substitution);
+				sOut += strlen(replacements[t].substitution);
+			} else {
+				*sOut = *sIn;
+				sIn++;
+				sOut++;
+			}
+		}
+	}
+	while (*sIn != '\0');
+
+	*sOut = '\0';
+}
+
+/** Get another character from wherever we are reading.
+ */
+static int getnextchar(struct xmlnode *n, char *c)
+{
+	/* Reading from fd */
+	if (n->fd != -1 && n->array == NULL)
+		return read(n->fd, c, sizeof(char));
+
+	/* Reading from array */
+	if (n->fd == -1 && n->array != NULL) {
+		*c = *(n->array);
+		n->array++;
+		return (*c == '\0') ? 0 : 1;
+	}
+	return 0;
+}
+
+/** Parse to find a tag enclosure. */
+static bool Parse(struct xmlnode *n)
+{
+	char c;
+	int r, l, m;
+	int tagcount;
+
+	/* Search for a < */
+	do {
+		r = getnextchar(n, &c);
+	}
+	while (r == 1 && c != '<');
+
+	if (c != '<') {
+		return false;
+	}
+
+	n->tag = g_malloc0(l = 64);
+	m = 0;
+
+	/* Read until a > */
+	do {
+		r = getnextchar(n, &n->tag[m++]);
+
+		/* Skip space at the start of a tag eg. < tag> */
+		if (m == 1 && isspace(n->tag[0]))
+			m = 0;
+
+		if (m == l)
+			n->tag = g_realloc(n->tag, l += 256);
+
+	}
+	while (r == 1 && n->tag[m - 1] != '>');
+
+	if (n->tag[m - 1] != '>') {
+		dprintf("Failed to find closing '>'");
+		g_free(n->tag);
+		return false;
+	}
+	/* Null terminate the tag */
+	n->tag[m - 1] = '\0';
+
+	/* Check if it is a <?...> or <!...> tag */
+	if (*n->tag == '?' || *n->tag == '!') {
+		dprintf("Found '<? ...>' or '<! ...>' tag");
+		dprintf(n->tag);
+		n->content = NULL;
+		return true;
+	}
+	/* Check if it is a < /> tag */
+	if (m >= 2 && n->tag[m - 2] == '/') {
+		n->tag[m - 2] = '\0';
+		dprintf("Found '<.../>' tag");
+		dprintf(n->tag);
+		n->content = NULL;
+		return true;
+	}
+	/* May need to truncate tag to remove attributes */
+	r = 0;
+	do {
+		r++;
+	}
+	while (n->tag[r] != '\0' && !isspace(n->tag[r]));
+	n->tag[r] = '\0';
+	n->attributes = &n->tag[r + 1];
+
+	dprintf("Found tag:");
+	dprintf(n->tag);
+
+	n->content = g_malloc0(l = 256);
+	tagcount = 1;
+	m = 0;
+
+	/* Now read until the closing tag */
+	do {
+		r = getnextchar(n, &n->content[m++]);
+
+		if (m > 1) {
+			/* Is there a new tag opening? */
+			if (n->content[m - 2] == '<') {
+				/* Is the tag opening or closing */
+				if (n->content[m - 1] == '/')
+					tagcount--;
+				else
+					tagcount++;
+			}
+			/* Catch any <blah/> style tags */
+			if (n->content[m - 2] == '/' && n->content[m - 1] == '>') {
+				tagcount--;
+			}
+		}
+		if (m == l)
+			n->content = g_realloc(n->content, l += 256);
+
+	}
+	while (r == 1 && tagcount > 0);
+
+	if (r != 1) {
+		dprintf("Failed to find closing tag");
+		dprintf(n->tag);
+		g_free(n->tag);
+		g_free(n->content);
+		return false;
+	}
+	/* Null terminate the content */
+	n->content[m - 2] = '\0';
+
+	return true;
+}
+
+/** Return some attribute value for a node. */
+const char *XmlGetAttribute(struct xmlnode *n, const char *attr)
+{
+	const char *s = n->attributes;
+	const uint32_t attrLen = strlen(attr);
+
+	while ((s = strstr(s, attr)) != NULL) {
+		const char *preS = s - 1;
+		const char *postS = s + attrLen;
+
+		/* Check if the attribute was found in isolation
+		 *  i.e. not part of another attribute name.
+		 */
+		if ((s == n->attributes || isspace(*preS)) && (*postS == '=' || isspace(*postS))) {
+			postS = skipSpace(postS);
+
+			if (*postS == '=') {
+				postS++;
+				postS = skipSpace(postS);
+				if (*postS == '"') {
+					char *c, *r = g_strdup(postS + 1);
+
+					if ((c = strchr(r, '"')) != NULL)
+						*c = '\0';
+
+					n->freeList[n->freeListLen++] = r;
+					return r;
+				}
+			}
+		}
+		/* Skip the match */
+		s++;
+	}
+	return NULL;
+}
+
+/** Return the tag.
+ */
+const char *XmlGetTag(struct xmlnode *n)
+{
+	return n->tag;
+}
+
+/** Compare the tag name with some string.
+ */
+int XmlTagStrcmp(struct xmlnode *n, const char *str)
+{
+	return strcmp(n->tag, str);
+}
+
+/** Get the content.
+ */
+const char *XmlGetContent(struct xmlnode *n)
+{
+	if (!n->converted) {
+		convert(n->content);
+		n->converted = true;
+	}
+	return n->content;
+}
+
+/** Free a node and its storage.
+ * \param[in,out] n  Pointer to node pointer to be freed.  If *n == NULL,
+ *                    no action is taken.  *n is always set to NULL when
+ *                    returning.
+ */
+void XmlDestroy(struct xmlnode **n)
+{
+	struct xmlnode *nn = *n;
+
+	if (nn) {
+		if (nn->tag) {
+			g_free(nn->tag);
+		}
+		if (nn->content) {
+			g_free(nn->content);
+		}
+		while (nn->freeListLen-- > 0) {
+			g_free(nn->freeList[nn->freeListLen]);
+		}
+		g_free(nn);
+		*n = NULL;
+	}
+}
+
+/** Parse some XML from a file descriptor.
+ * \param[in,out] n  Pointer to a node pointer. If *n != NULL, it will be freed.
+ */
+bool XmlParseFd(struct xmlnode **n, int fd)
+{
+	XmlDestroy(n);
+
+	*n = g_malloc0(sizeof(struct xmlnode));
+	(*n)->fd = fd;
+
+	if (!Parse(*n)) {
+		g_free(*n);
+		*n = NULL;
+		return false;
+	}
+	return true;
+}
+
+/** Parse from a string buffer.
+ * Parse some XML in a string, returning the position in the string reached,
+ * or NULL if the string was exhausted and no node was found.
+ * \param[in,out] n  Pointer to a node pointer. If *n != NULL, it will be freed.
+ */
+const char *XmlParseStr(struct xmlnode **n, const char *s)
+{
+	XmlDestroy(n);
+
+	if (s == NULL) {
+		return NULL;
+	}
+	*n = g_malloc0(sizeof(struct xmlnode));
+	(*n)->fd = -1;
+	(*n)->array = s;
+	if (!Parse(*n)) {
+		g_free(*n);
+		*n = NULL;
+		return NULL;
+	} else {
+		return (*n)->array;
+	}
+}
+
+/** Find a sub-node whose name matches the passed tag. */
+struct xmlnode *XmlFindSubNode(struct xmlnode *n, const char *tag)
+{
+	if (n == NULL) {
+		return NULL;
+	}
+	const char *s = XmlGetContent(n);
+	struct xmlnode *r = NULL;
+	do {
+		XmlDestroy(&r);
+		s = XmlParseStr(&r, s);
+	}
+	while (r && XmlTagStrcmp(r, tag) != 0);
+
+	return r;
+}
+
+/** Same as XmlFindSubNode(), but frees the past node before returning.
+ */
+struct xmlnode *XmlFindSubNodeFree(struct xmlnode *n, const char *tag)
+{
+	struct xmlnode *r = XmlFindSubNode(n, tag);
+	XmlDestroy(&n);
+	return r;
+}
+
+struct cfetch {
+    char    *data;
+    size_t   size;
+};
+
+/** Callback for fetching URLs via CURL.  */
+static size_t curlCallback(void *ptr, size_t size, size_t nmemb, void *param)
+{
+    struct cfetch *mbr = (struct cfetch *)param;
+    size_t realsize = size * nmemb;
+    mbr->data = g_realloc(mbr->data, mbr->size + realsize + 1);
+    memcpy(&mbr->data[mbr->size], ptr, realsize);
+    mbr->size += realsize;
+    mbr->data[mbr->size] = '\0';
+    return realsize;
+}
+
+#define FMAP(tdef,fname,fptr) \
+	tdef fptr = (tdef)dlsym(h,fname);\
+	if(h == NULL) {\
+		printf("Library function not found: %s\n",fname);\
+		goto cleanup;\
+	}
+
+static void* get_curl_lib()
+{
+	char *libs[] = { "libcurl.so.4", "libcurl.so", "libcurl-gnutls.so.4",
+						"libcurl.so.3", NULL };
+	static void *h = NULL;
+
+	if(h) return h;
+	char **p = libs;
+	while(*p) {
+		h = dlopen(*p, RTLD_LAZY);
+		if(h) {
+			// printf("Loaded %s\n", *p);
+			return h;
+		}
+		p++;
+	}
+	printf("Failed to open Curl library.\n");
+	return NULL;
+}
+
+/** Fetch some URL and return the contents in a memory buffer.
+ * \param[in,out] size    Pointer to fill with the length of returned data.
+ * \param[in]     urlFmt  The URL, or a printf-style format string for the URL.
+ * \returns A pointer to the read data, or NULL if the fetch failed in any way.
+*/
+static void *CurlFetch(size_t *size, const char *urlFmt, ...)
+{
+	void *h = get_curl_lib();
+	if(!h) return NULL;
+
+	typedef void*		(*ce_init_t)(void);
+	typedef int			(*ce_setopt_t)(void *, int, ...);
+	typedef int			(*ce_perform_t)(void *);
+	typedef const char* (*ce_strerror_t)(int);
+	typedef void		(*ce_cleanup_t)(void *);
+
+	FMAP(ce_init_t,"curl_easy_init",ce_init);
+	FMAP(ce_setopt_t,"curl_easy_setopt",ce_setopt);
+	FMAP(ce_perform_t,"curl_easy_perform",ce_perform);
+	FMAP(ce_strerror_t,"curl_easy_strerror",ce_strerror);
+	FMAP(ce_cleanup_t,"curl_easy_cleanup",ce_cleanup);
+
+	void *ch = ce_init();
+	if (ch == NULL) {
+		fprintf(stderr,"Error: Failed to initialise libcurl\n");
+		exit(EXIT_FAILURE);
+	}
+	/* Try to get the data */
+	const int CO_URL = 10002;
+	const int CO_WRITEFUNCTION = 20011;
+	const int CO_WRITEDATA = 10001;
+	const int CO_USERAGENT = 10018;
+	const int CO_FAILONERROR = 45;
+	//const int CO_VERBOSE = 41;
+	struct cfetch cfdata;
+
+	memset(&cfdata, 0, sizeof(cfdata));
+
+	/* Formulate the URL */
+	char buf[1024];
+	va_list ap;
+	va_start(ap, urlFmt);
+	vsnprintf(buf, sizeof(buf), urlFmt, ap);
+	va_end(ap);
+
+	ce_setopt(ch, CO_URL, buf);
+	ce_setopt(ch, CO_WRITEFUNCTION, curlCallback);
+	ce_setopt(ch, CO_WRITEDATA, (void *) &cfdata);
+	ce_setopt(ch, CO_USERAGENT, "irongrip/0.9");
+	ce_setopt(ch, CO_FAILONERROR, 1);
+	/*
+	ce_setopt(ch, CO_VERBOSE, 1);
+	// Set proxy information if necessary.
+    (*curl_easy_setopt)(curl, CURLOPT_PROXY, proxy);
+    (*curl_easy_setopt)(curl, CURLOPT_PROXYUSERPWD, proxy_user_pwd);
+	*/
+
+	void *res;
+	int err_code = ce_perform(ch);
+	if (err_code == 0) {
+		res = cfdata.data;
+		if (size != NULL) {
+			*size = cfdata.size;
+		}
+	} else {
+		printf("CURL err %d = %s\n", err_code, ce_strerror(err_code));
+		res = NULL;
+		if (size != NULL) {
+			*size = 0;
+		}
+		g_free(cfdata.data);
+	}
+	ce_cleanup(ch);
+
+cleanup:
+	// dlclose(h); // Would blow up application
+	return res;
+}
+
+/** Free memory associated with a mbartistcredit_t structure.  */
+static void freeArtist(mbartistcredit_t * ad)
+{
+	g_free(ad->artistName);
+	g_free(ad->artistNameSort);
+	for (uint8_t t = 0; t < ad->artistIdCount; t++) {
+		g_free(ad->artistId[t]);
+	}
+	g_free(ad->artistId);
+}
+
+static void freeMedium(mbmedium_t * md)
+{
+	g_free(md->title);
+	for (uint16_t t = 0; t < md->trackCount; t++) {
+		mbtrack_t *td = &md->track[t];
+		g_free(td->trackName);
+		freeArtist(&td->trackArtist);
+	}
+	g_free(md->track);
+}
+
+static void freeRelease(mbrelease_t * rel)
+{
+	g_free(rel->releaseGroupId);
+	g_free(rel->releaseId);
+	g_free(rel->asin);
+	g_free(rel->albumTitle);
+	g_free(rel->releaseType);
+	freeArtist(&rel->albumArtist);
+	freeMedium(&rel->medium);
+}
+
+static bool artistsAreIdentical(const mbartistcredit_t * ma, const mbartistcredit_t * mb)
+{
+	if (strcheck(ma->artistName, mb->artistName) != 0 ||
+		strcheck(ma->artistNameSort, mb->artistNameSort) != 0) {
+		return false;
+	}
+	return true;
+}
+
+static bool mediumsAreIdentical(const mbmedium_t * ma, const mbmedium_t * mb)
+{
+	if (ma->discNum != mb->discNum ||
+		ma->trackCount != mb->trackCount || strcheck(ma->title, mb->title) != 0) {
+		return false;
+	}
+	for (uint16_t t = 0; t < ma->trackCount; t++) {
+		const mbtrack_t *mta = &ma->track[t], *mtb = &mb->track[t];
+		if (strcheck(mta->trackName, mtb->trackName) != 0 ||
+			!artistsAreIdentical(&mta->trackArtist, &mtb->trackArtist)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool releasesAreIdentical(const mbrelease_t * ra, const mbrelease_t * rb)
+{
+	if (ra->discTotal != rb->discTotal ||
+		!artistsAreIdentical(&ra->albumArtist, &rb->albumArtist) ||
+		strcheck(ra->releaseGroupId, rb->releaseGroupId) != 0 ||
+		strcheck(ra->albumTitle, rb->albumTitle) != 0 ||
+		strcheck(ra->releaseType, rb->releaseType) != 0 ||
+		strcheck(ra->asin, rb->asin) != 0 || !mediumsAreIdentical(&ra->medium, &rb->medium)) {
+		return false;
+	}
+	return true;
+}
+
+static uint16_t dedupeMediums(uint16_t mediumCount, mbmedium_t * mr)
+{
+	for (uint16_t t = 0; t < mediumCount; t++) {
+		bool dupe = false;
+
+		for (uint16_t u = t + 1; u < mediumCount && !dupe; u++) {
+			if (mediumsAreIdentical(&mr[t], &mr[u])) {
+				dupe = true;
+			}
+		}
+
+		if (dupe) {
+			mediumCount--;
+			freeMedium(&mr[t]);
+			mr[t] = mr[mediumCount];
+			t--;
+		}
+	}
+
+	return mediumCount;
+}
+
+static void dedupeReleases(mbresult_t * mr)
+{
+	for (uint8_t t = 0; t < mr->releaseCount; t++) {
+		bool dupe = false;
+
+		for (uint8_t u = t + 1; u < mr->releaseCount && !dupe; u++) {
+			if (releasesAreIdentical(&mr->release[t], &mr->release[u])) {
+				dupe = true;
+			}
+		}
+
+		if (dupe) {
+			mr->releaseCount--;
+			freeRelease(&mr->release[t]);
+			mr->release[t] = mr->release[mr->releaseCount];
+			t--;
+		}
+	}
+}
+
+/** Process an %lt;artist-credit&gt; node. */
+static void processArtistCredit(struct xmlnode *artistCreditNode, mbartistcredit_t * cd)
+{
+
+	const char *s = XmlGetContent(artistCreditNode);
+	struct xmlnode *n = NULL;
+
+	assert(strcmp(XmlGetTag(artistCreditNode), "artist-credit") == 0);
+
+	/* Artist credit can have multiple entries... */
+	while ((s = XmlParseStr(&n, s)) != NULL) {
+		/* Process name-credits only at present */
+		if (XmlTagStrcmp(n, "name-credit") == 0) {
+			struct xmlnode *o, *artistNode = XmlFindSubNode(n, "artist");
+
+			cd->artistIdCount++;
+			cd->artistId = g_realloc(cd->artistId, sizeof(char *) * cd->artistIdCount);
+
+			cd->artistId[cd->artistIdCount - 1] = g_strdup(XmlGetAttribute(artistNode, "id"));
+
+			o = XmlFindSubNode(artistNode, "name");
+			if (o) {
+				const char *aa = XmlGetContent(o);
+
+				if (cd->artistName == NULL) {
+					cd->artistName = g_strdup(aa);
+				} else {
+					/* Concatenate multiple artists if needed */
+					cd->artistName =
+						g_realloc(cd->artistName, strlen(aa) + strlen(cd->artistName) + 3);
+
+					strcat(cd->artistName, ", ");
+					strcat(cd->artistName, aa);
+				}
+				XmlDestroy(&o);
+			}
+			o = XmlFindSubNode(artistNode, "sort-name");
+			if (o) {
+				cd->artistNameSort = g_strdup(XmlGetContent(o));
+				XmlDestroy(&o);
+			}
+			XmlDestroy(&artistNode);
+		}
+	}
+}
+
+/** Process a &lt;track&gt; track node.  */
+static void processTrackNode(struct xmlnode *trackNode, mbmedium_t * md)
+{
+	struct xmlnode *n = NULL;
+
+	assert(strcmp(XmlGetTag(trackNode), "track") == 0);
+
+	n = XmlFindSubNode(trackNode, "position");
+	if (n) {
+		uint16_t position = atoi(XmlGetContent(n));
+
+		if (position >= 1 && position <= md->trackCount) {
+			struct xmlnode *recording;
+			mbtrack_t *td = &md->track[position - 1];
+
+			recording = XmlFindSubNode(trackNode, "recording");
+			if (recording) {
+				struct xmlnode *m = NULL;
+				const char *id;
+
+				id = XmlGetAttribute(recording, "id");
+				if (id) {
+					td->trackId = g_strdup(id);
+				}
+				m = XmlFindSubNode(recording, "title");
+				if (m) {
+					td->trackName = g_strdup(XmlGetContent(m));
+					XmlDestroy(&m);
+				}
+				m = XmlFindSubNode(recording, "artist-credit");
+				if (m) {
+					processArtistCredit(m, &td->trackArtist);
+					XmlDestroy(&m);
+				}
+				XmlDestroy(&recording);
+			}
+		}
+		XmlDestroy(&n);
+	}
+}
+
+/** Process a &lt;medium&gt; node. */
+static bool processMediumNode(struct xmlnode *mediumNode, const char *discId, mbmedium_t * md)
+{
+	bool mediumValid = false;
+	struct xmlnode *n = NULL;
+
+	assert(strcmp(XmlGetTag(mediumNode), "medium") == 0);
+
+	memset(md, 0, sizeof(mbmedium_t));
+
+	/* First find the disc-list to check if the discId is present */
+	n = XmlFindSubNode(mediumNode, "disc-list");
+	if (n) {
+		struct xmlnode *disc = NULL;
+		const char *s;
+
+		s = XmlGetContent(n);
+		while ((s = XmlParseStr(&disc, s)) != NULL) {
+			if (XmlTagStrcmp(disc, "disc") == 0) {
+				const char *id = XmlGetAttribute(disc, "id");
+
+				if (id && strcmp(id, discId) == 0) {
+					mediumValid = true;
+				}
+			}
+		}
+		XmlDestroy(&disc);
+		XmlDestroy(&n);
+	}
+
+	/* Check if the medium should be processed */
+	if (mediumValid) {
+		memset(md, 0, sizeof(mbmedium_t));
+
+		n = XmlFindSubNode(mediumNode, "position");
+		if (n) {
+			md->discNum = atoi(XmlGetContent(n));
+			XmlDestroy(&n);
+		}
+		n = XmlFindSubNode(mediumNode, "title");
+		if (n) {
+			md->title = g_strdup(XmlGetContent(n));
+			XmlDestroy(&n);
+		}
+		n = XmlFindSubNode(mediumNode, "track-list");
+		if (n) {
+			const char *count = XmlGetAttribute(n, "count");
+
+			if (count) {
+				struct xmlnode *track = NULL;
+				const char *s;
+
+				md->trackCount = atoi(count);
+				md->track = g_malloc0(sizeof(mbtrack_t) * md->trackCount);
+
+				s = XmlGetContent(n);
+				while ((s = XmlParseStr(&track, s)) != NULL) {
+					if (XmlTagStrcmp(track, "track") == 0) {
+						processTrackNode(track, md);
+					}
+				}
+				mediumValid = true;
+				XmlDestroy(&track);
+			}
+			XmlDestroy(&n);
+		}
+	}
+	return mediumValid;
+}
+
+static uint16_t processReleaseNode(struct xmlnode *releaseNode, const char *discId,
+								   mbrelease_t * cd, mbmedium_t ** md)
+{
+	struct xmlnode *n;
+	assert(strcmp(XmlGetTag(releaseNode), "release") == 0);
+
+	memset(cd, 0, sizeof(mbrelease_t));
+
+	cd->releaseId = g_strdup(XmlGetAttribute(releaseNode, "id"));
+
+	n = XmlFindSubNode(releaseNode, "asin");
+	if (n) {
+		cd->asin = g_strdup(XmlGetContent(n));
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "title");
+	if (n) {
+		cd->albumTitle = g_strdup(XmlGetContent(n));
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "release-group");
+	if (n) {
+		cd->releaseType = g_strdup(XmlGetAttribute(n, "type"));
+		cd->releaseGroupId = g_strdup(XmlGetAttribute(n, "id"));
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "artist-credit");
+	if (n) {
+		processArtistCredit(n, &cd->albumArtist);
+		XmlDestroy(&n);
+	}
+	n = XmlFindSubNode(releaseNode, "medium-list");
+	if (n) {
+		const char *s, *count = XmlGetAttribute(n, "count");
+		struct xmlnode *m = NULL;
+		mbmedium_t *mediums = NULL;
+		uint16_t mediumCount = 0;
+
+		if (count) {
+			cd->discTotal = atoi(count);
+		}
+		s = XmlGetContent(n);
+
+		while ((s = XmlParseStr(&m, s)) != NULL) {
+			if (XmlTagStrcmp(m, "medium") == 0) {
+				mediums = g_realloc(mediums, sizeof(mbmedium_t) * (mediumCount + 1));
+				if (processMediumNode(m, discId, &mediums[mediumCount])) {
+					mediumCount++;
+				}
+			}
+		}
+		XmlDestroy(&n);
+		XmlDestroy(&m);
+		mediumCount = dedupeMediums(mediumCount, mediums);
+		*md = mediums;
+		return mediumCount;
+	} else {
+		*md = NULL;
+		return 0;
+	}
+}
+
+/** Process a release. */
+static bool processRelease(const char *releaseId, const char *discId, mbresult_t * res)
+{
+	struct xmlnode *metaNode = NULL, *releaseNode = NULL;
+	void *buf;
+	const char *s;
+
+	s = buf = CurlFetch(NULL,
+		  "http://musicbrainz.org/ws/2/release/%s?inc=recordings+artists+release-groups+discids+artist-credits",
+			  releaseId);
+	if (buf == NULL) {
+		return false;
+	}
+	/* Find the metadata node */
+	do {
+		s = XmlParseStr(&metaNode, s);
+	}
+	while (metaNode != NULL && XmlTagStrcmp(metaNode, "metadata") != 0);
+
+	g_free(buf);
+
+	if (metaNode == NULL) {
+		return false;
+	}
+	releaseNode = XmlFindSubNodeFree(metaNode, "release");
+	if (releaseNode) {
+		mbmedium_t *medium = NULL;
+		uint16_t mediumCount;
+		mbrelease_t release;
+		mediumCount = processReleaseNode(releaseNode, discId, &release, &medium);
+
+		for (uint16_t m = 0; m < mediumCount; m++) {
+			mbrelease_t *newRel;
+			res->releaseCount++;
+			res->release = g_realloc(res->release, sizeof(mbrelease_t) * res->releaseCount);
+			newRel = &res->release[res->releaseCount - 1];
+			memcpy(newRel, &release, sizeof(mbrelease_t));
+			memcpy(&newRel->medium, &medium[m], sizeof(mbmedium_t));
+		}
+		XmlDestroy(&releaseNode);
+		return true;
+	}
+	return false;
+}
+
+/** Lookup some CD.
+ * \param[in] discId  The ID of the CD to lookup.
+ * \param[in] res     Pointer to populate with the results.
+ * \retval true   If the CD found and the results returned.
+ * \retval false  If the CD is unknown to MusicBrainz.
+ */
+static bool musicbrainz_lookup(const char *discId, mbresult_t * res)
+{
+	memset(res, 0, sizeof(mbresult_t));
+	void *buf;
+	const char *s;
+	s = buf = CurlFetch(NULL, "http://musicbrainz.org/ws/2/discid/%s", discId);
+	if (!buf) {
+		return false;
+	}
+	struct xmlnode *metaNode = NULL;
+	/* Find the metadata node */
+	do {
+		s = XmlParseStr(&metaNode, s);
+	}
+	while (metaNode != NULL && XmlTagStrcmp(metaNode, "metadata") != 0);
+	g_free(buf);
+	if (metaNode == NULL) {
+		return false;
+	}
+	struct xmlnode *releaseListNode = NULL;
+	releaseListNode = XmlFindSubNodeFree(XmlFindSubNodeFree(metaNode, "disc"), "release-list");
+	if (releaseListNode) {
+		struct xmlnode *releaseNode = NULL;
+		const char *s = XmlGetContent(releaseListNode);
+		while ((s = XmlParseStr(&releaseNode, s)) != NULL) {
+			const char *releaseId;
+			if ((releaseId = XmlGetAttribute(releaseNode, "id")) != NULL) {
+				processRelease(releaseId, discId, res);
+			}
+		}
+		XmlDestroy(&releaseNode);
+		dedupeReleases(res);
+	}
+	XmlDestroy(&releaseListNode);
+	return true;
+}
+
+static void mb_free(mbresult_t * res)
+{
+	if(res==NULL) return;
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		freeRelease(&res->release[r]);
+	}
+	g_free(res->release);
+}
+
+static void maystore(GList **d, char *a) {
+	const char *PATTERNS[] =  { "ecx.images-amazon.com",
+								"www.allmusic.com/album/",
+								"www.discogs.com/master/",
+								"www.discogs.com/release/",
+								"www.youtube.com/watch?v=",
+								NULL };
+	for (GList *c = g_list_first(*d); c != NULL; c = g_list_next(c)) {
+		char *s = (char *) c->data;
+		if(strcmp(a,s)==0) return;
+	}
+	for(const char **y = PATTERNS;*y;y++) {
+		if(!strstr(a, *y)) continue;
+		*d = g_list_append(*d, g_strdup(a));
+		return;
+	}
+}
+
+#define HTML_HEADER \
+"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n" \
+"\t\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n" \
+"<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" \
+"<head>\n<title>Data from MusicBrainz</title>\n</head>\n<body>\n"
+
+static void musicbrainz_scan(const mbresult_t * res, char *path)
+{
+	const char *FILTERS[] = { "http://", "coverartarchive.org/release/", NULL };
+	const char *ANTIPATTERNS[] =  { "musicbrainz.org", "www.w3.org/", "purl.org/", "metabrainz.org/", NULL };
+
+	gchar *dir = g_strdup_printf("%s/MusicBrainz-DiscId-[%s]", path, g_data->disc_id);
+	if(!mkdir_p(dir)) return;
+
+	notify("Downloading...");
+	//printf("Disc id WS2 = http://musicbrainz.org/ws/2/discid/%s\n", g_data->disc_id);
+
+	for (uint16_t r = 0; r < res->releaseCount; r++) {
+		mbrelease_t *rel = &res->release[r];
+
+		fetch_image(rel, dir);
+
+		char *html = g_strdup_printf("%s/%s_MusicBrainz.html", dir, rel->releaseId);
+		FILE *fh = fopen(html, "wb");
+		g_free(html);
+		fprintf(fh, HTML_HEADER);
+		gchar *url = g_strdup_printf("http://musicbrainz.org/release/%s", rel->releaseId);
+		fprintf(fh, "<p>Release page : <a href=\"%s\">%s</a></p>\n", url, url);
+		//printf("Release WS2 = http://musicbrainz.org/ws/2/release/%s\n", rel->releaseId);
+		g_free(url);
+		size_t sz = 0;
+		const char *fmt = "http://musicbrainz.org/release/%s";
+		char *c = CurlFetch(&sz, fmt, rel->releaseId);
+		if(!c) goto next;
+		if(sz<256) goto next;
+		char *b = calloc(1, sz); // working copy
+		GList *d = NULL;
+		for(const char **f = FILTERS;*f;f++) {
+			memcpy(b,c,sz);
+			for(char *p=b;*p;p++) {
+				char *a = strstr(p, *f);
+				if(a == NULL) {
+					// fprintf(stderr, "BREAKING with %lu bytes remaining out of %lu\n", strlen(p), sz);
+					break;
+				}
+				for(char *e = a+strlen(*f);*e;e++) {
+					if(*e != '<' && *e != '"' && !isspace(*e)) continue;
+					*e = 0; p = e;
+					int found = 0;
+					for(const char **x = ANTIPATTERNS;*x;x++) {
+						if(strstr(a, *x)) { found=1; break; }
+					}
+					if(!found) { maystore(&d,a); }
+					break;
+				}
+			}
+		}
+		// printf("G_LIST_LENGTH = %d\n", g_list_length(d));
+		for (GList *c = g_list_first(d); c != NULL; c = g_list_next(c)) {
+			char *s = (char *) c->data;
+			fprintf(fh,"<pre>%s</pre>\n", s);
+		}
+		g_free(b);
+		g_free(c);
+		if(d) g_list_free(d);
+next:
+		fprintf(fh, "<pre>");
+		musicbrainz_print(fh,rel);
+		fprintf(fh, "</pre>");
+		fprintf(fh, "</body>\n</html>\n");
+		fclose(fh);
+	}
+}
+
+static void musicbrainz_print(FILE *fd, const mbrelease_t *rel)
+{
+	fprintf(fd,"Release=%s\n", rel->releaseId);
+	fprintf(fd,"  ASIN=%s\n", rel->asin);
+	fprintf(fd,"  Album=%s\n", rel->albumTitle);
+	fprintf(fd,"  AlbumArtist=%s\n", rel->albumArtist.artistName);
+	fprintf(fd,"  AlbumArtistSort=%s\n", rel->albumArtist.artistNameSort);
+	fprintf(fd,"  ReleaseType=%s\n", rel->releaseType);
+	fprintf(fd,"  ReleaseGroupId=%s\n", rel->releaseGroupId);
+	for (uint8_t t = 0; t < rel->albumArtist.artistIdCount; t++) {
+		fprintf(fd,"  ArtistId=%s\n", rel->albumArtist.artistId[t]);
+	}
+	fprintf(fd,"  Total Disc=%u\n", rel->discTotal);
+	const mbmedium_t *mb = &rel->medium;
+	fprintf(fd,"  Medium\n");
+	fprintf(fd,"    DiscNum=%u\n", mb->discNum);
+	fprintf(fd,"    Title=%s\n", mb->title);
+	for (uint16_t u = 0; u < mb->trackCount; u++) {
+		const mbtrack_t *td = &mb->track[u];
+		fprintf(fd,"    Track %u\n", u);
+		fprintf(fd,"      Id=%s\n", td->trackId);
+		fprintf(fd,"      Title=%s\n", td->trackName);
+		fprintf(fd,"      Artist=%s\n", td->trackArtist.artistName);
+		fprintf(fd,"      ArtistSort=%s\n", td->trackArtist.artistNameSort);
+		for (uint8_t t = 0; t < td->trackArtist.artistIdCount; t++) {
+			fprintf(fd,"      ArtistId=%s\n", td->trackArtist.artistId[t]);
+		}
+	}
+}
+
+#define M_ArraySize(a)  (sizeof(a) / sizeof(a[0]))
+
+// TODO: handle one pixel GIF from Amazon
+/*
+0000000: 4749 4638 3961 0100 0100 8001 0000 0000  GIF89a..........
+0000010: ffff ff21 f904 0100 0001 002c 0000 0000  ...!.......,....
+0000020: 0100 0100 0002 024c 0100 3b              .......L..;
+
+unsigned char AmazonOnePixelGIF[] = {
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x01,
+  0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01, 0x00,
+  0x00, 0x01, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+  0x00, 0x02, 0x02, 0x4c, 0x01, 0x00, 0x3b
+};
+unsigned int AmazonOnePixelGIF_len = 43;
+*/
+static void fetch_image(const mbrelease_t *rel, char *path) {
+	if(!rel->asin) return;
+	const char *artUrl[] = {
+		"http://images.amazon.com/images/P/%s.02._SCLZZZZZZZ_.jpg", /* UK */
+		"http://images.amazon.com/images/P/%s.01._SCLZZZZZZZ_.jpg", /* US */
+		"http://images.amazon.com/images/P/%s.03._SCLZZZZZZZ_.jpg", /* DE */
+		"http://images.amazon.com/images/P/%s.08._SCLZZZZZZZ_.jpg", /* FR */
+		"http://images.amazon.com/images/P/%s.09._SCLZZZZZZZ_.jpg"  /* JP */
+	};
+	const char *artCountry[] = { "UK", "US", "DE", "FR", "JP" };
+	uint8_t attempt = 0;
+	do {
+		size_t sz = 0;
+		const char *s = CurlFetch(&sz, artUrl[attempt], rel->asin);
+		if(!s) continue;
+		if(sz<256) continue;
+		// printf(artUrl[attempt], rel->asin); printf("\n");
+		char *file = g_strdup_printf("%s/%s_Amazon_%s_%s.jpg", path,
+							rel->releaseId, rel->asin, artCountry[attempt]);
+		FILE *fd = fopen(file, "wb");
+		g_free(file);
+		if(fd) {
+			fwrite(s,1,sz,fd);
+			fclose(fd);
+			break;
+		}
+	} while(++attempt < M_ArraySize(artUrl));
 }
 
 int main(int argc, char *argv[])
@@ -4822,6 +6043,8 @@ int main(int argc, char *argv[])
 	g_data->updated = g_cond_new();
 	g_data->monolock = g_mutex_new();
 	g_data->guilock = g_mutex_new();
+	int version = 0;
+	if(get_notify_lib(&version)) g_data->has_notify = true;
 	load_prefs();
 	log_init();
 #ifdef ENABLE_NLS
@@ -4836,10 +6059,11 @@ int main(int argc, char *argv[])
 	gtk_widget_show(win_main);
 	lookup_cdparanoia();
 	// recurring timeout to automatically re-scan cdrom once in a while
-	gdk_threads_add_timeout(5000, idle, (void *)1);
+	gdk_threads_add_timeout(CD_SCAN_INTERVAL, idle, (void *)1);
 	// add an idle event to scan the cdrom drive ASAP
+	gdk_threads_add_timeout(REFRESH_INTERVAL*2, cb_gui_update, NULL);
+	gdk_threads_add_timeout(FS_SCAN_INTERVAL, gfileinfo_cb, 0);
 	gdk_threads_add_idle(scan_on_startup, NULL);
-	gdk_threads_add_timeout(400, cb_gui_update, NULL);
 	gtk_main();
 	free_prefs(g_prefs);
 	log_end();

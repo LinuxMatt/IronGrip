@@ -1,12 +1,13 @@
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.59])
-AC_INIT([irongrip], [0.8])
+AC_INIT([irongrip], [0.9-beta])
 AC_CONFIG_SRCDIR([configure.ac])
 AM_INIT_AUTOMAKE
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 IT_PROG_INTLTOOL([0.34.90])
+m4_ifndef([AM_SILENT_RULES], [m4_define([AM_SILENT_RULES],[])])
 AM_SILENT_RULES([yes])
 
 AC_ISC_POSIX

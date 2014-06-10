@@ -7,7 +7,7 @@ Features
 - Supports WAV, MP3, Ogg Vorbis and FLAC encoding
 - Uses CDDB
 - Finds cdrom drives
-- Compilation and installation from source is easy ;)
+- Compilation and installation from source is so easy ;)
 [![Build Status](https://travis-ci.org/LinuxMatt/IronGrip.png?branch=master)](https://travis-ci.org/LinuxMatt/IronGrip)
 
 Binary packages
@@ -59,6 +59,9 @@ On Ubuntu, you can just run the following commands to install all requirements:
 - sudo apt-get install libgtk2.0-dev
 - sudo apt-get install intltool
 
+On Fedora, you may have to install gtk+2-devel:
+- yum install gtk+2-devel
+
 Compiling
 ---------
 First, you should install all the build dependencies.
@@ -73,12 +76,14 @@ Supported systems
 The following distributions are expected to work with IronGrip:
 - Ubuntu 8.04 LTS and above (32bit and 64bit)
 - Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
+- Fedora 10 and above 
 - All Linux distributions with the above requirements (not tested yet)
 
 Test systems
 ------------
 The following distributions are used for developing IronGrip:
 - Ubuntu 8.04.4 LTS
+- Fedora 10
 - Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages.
 - Ubuntu 12.04 LTS / Linux Mint 13 LTS
 - Ubuntu 13.10 / Linux Mint 16

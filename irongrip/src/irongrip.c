@@ -41,6 +41,7 @@
 #include <gdk/gdkkeysyms.h>
 #include <glib.h>
 #include <glib/gprintf.h>
+#include <gio/gio.h>
 #include <gtk/gtk.h>
 #include <libgen.h>
 #include <limits.h>

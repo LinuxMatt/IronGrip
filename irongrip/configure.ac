@@ -28,7 +28,7 @@ AC_FUNC_REALLOC
 AC_CHECK_FUNCS([alarm bzero dup2 ftime gethostbyname memset mkdir regcomp select socket strchr strdup strerror strrchr strtol])
 AC_SEARCH_LIBS([dlopen], [dl dld], [], [ AC_MSG_ERROR([unable to find the dlopen() function]) ])
 
-pkg_modules="gtk+-2.0 >= 2.8.0, gthread-2.0 >= 2.4.0, glib-2.0 >= 2.10.0"
+pkg_modules="gtk+-2.0 >= 2.12.0, gthread-2.0 >= 2.4.0, glib-2.0 >= 2.16.0, gio-2.0"
 PKG_CHECK_MODULES(PACKAGE, [$pkg_modules])
 AC_SUBST(PACKAGE_CFLAGS)
 AC_SUBST(PACKAGE_LIBS)

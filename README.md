@@ -107,7 +107,7 @@ The following distributions are expected to work with IronGrip:
 Test systems
 ------------
 The following distributions are used for developing IronGrip:
-- Ubuntu 8.04.4 LTS
+- Ubuntu 8.04.4 LTS (Gtk+ 2.12, Glib 2.16, gcc 4.2, linux kernel 2.6.24)
 - Fedora 10
 - Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages.
 - Ubuntu 12.04 LTS / Linux Mint 13 LTS

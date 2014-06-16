@@ -99,7 +99,7 @@ You can run the compiled program from the 'src' subdirectory.
 Supported systems
 -----------------
 The following distributions are expected to work with IronGrip:
-- Ubuntu 8.04 LTS and above (32bit and 64bit) => Does not compile v0.9-beta, GIO problem
+- Ubuntu 8.04 LTS and above (32bit and 64bit)
 - Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
 - Fedora 10 and above 
 - All Linux distributions with the above requirements (not tested yet)

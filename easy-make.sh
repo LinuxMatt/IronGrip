@@ -11,6 +11,11 @@ usage() {
 	exit 2
 }
 
+LSB=$(which lsb_release)
+if [[ "x$LSB" != "x" ]] ; then
+	${LSB} -sd
+fi
+
 if [[ -z ${1} ]] ; then
 	usage
 fi

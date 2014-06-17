@@ -58,6 +58,7 @@ action_clean() {
 	rm config.guess 2>/dev/null
 	rm config.sub 2>/dev/null
 	rm ltmain.sh 2>/dev/null
+	rm INSTALL 2>/dev/null
 	#DEB CLEANUP
 	rm debian/files 2>/dev/null
 	rm debian/irongrip.debhelper.log 2>/dev/null
@@ -65,12 +66,6 @@ action_clean() {
 	rm debian/irongrip.postrm.debhelper 2>/dev/null
 	rm debian/irongrip.substvars 2>/dev/null
 	rm -r debian/irongrip/ 2>/dev/null
-
-	# ../irongrip_0.4-1_amd64.changes
-	# ../irongrip_0.4-1_amd64.deb
-	# ../irongrip_0.4-1.debian.tar.gz
-	# ../irongrip_0.4-1.dsc
-	# ../irongrip_0.4.orig.tar.gz
 }
 
 action_build() {

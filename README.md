@@ -15,7 +15,7 @@ Features
 Binary packages for Linux
 -------------------------
 Binary packages are often outdated. You should definitely build from source.
-Don't worry, it's very easy ! The provided script *easy-make* is here help you.
+Don't worry, it's very easy ! The provided script *easy-make* is here to help you.
 Just run *./easy-make.sh* in a terminal and follow the instructions.
 
 _We are looking for packagers._
@@ -102,12 +102,14 @@ The following distributions are expected to work with IronGrip:
 - Ubuntu 8.04 LTS and above (32bit and 64bit)
 - Any Ubuntu derivative of version 8.04 and above (e.g. Linux Mint 5 and up)
 - Fedora 10 and above 
+- Debian GNU/Linux 5 (Lenny) and above
 - All Linux distributions with the above requirements (not tested yet)
 
 Test systems
 ------------
 The following distributions are used for developing IronGrip:
 - Ubuntu 8.04.4 LTS (Gtk+ 2.12, Glib 2.16, gcc 4.2, linux kernel 2.6.24)
+- Debian GNU/Linux 5.0.10 (Gtk+ 2.12, Glib 2.16, gcc 4.3.2, linux kernel 2.6.26) 
 - Fedora 10
 - Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages (Gtk+ 2.20, Glib 2.24).
 - Ubuntu 12.04 LTS / Linux Mint 13 LTS

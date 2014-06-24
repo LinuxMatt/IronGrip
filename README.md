@@ -83,6 +83,7 @@ On Ubuntu, you can just run the following commands to install all requirements:
 - sudo apt-get install dh-make
 - sudo apt-get install libgtk2.0-dev
 - sudo apt-get install intltool
+- sudo apt-get install build-essential
 
 On Fedora, you may have to install gtk+2-devel:
 - yum install gtk+2-devel
@@ -113,7 +114,7 @@ The following distributions are used for developing IronGrip:
 - Fedora 10
 - Ubuntu 10.04.4 LTS (32 bit and 64 bit), used also for creating packages (Gtk+ 2.20, Glib 2.24).
 - Ubuntu 12.04 LTS / Linux Mint 13 LTS
-- Ubuntu 13.10 / Linux Mint 16
+- Ubuntu 14.04 LTS / Linux Mint 17 LTS
 
 Homepage
 --------

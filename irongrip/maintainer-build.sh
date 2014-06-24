@@ -17,6 +17,7 @@ action_debian_setup() {
     sudo apt-get install -q dh-make
     sudo apt-get install -q libgtk2.0-dev
     sudo apt-get install -q intltool
+    sudo apt-get install -q build-essential
 }
 
 action_debian_run_dependencies() {
